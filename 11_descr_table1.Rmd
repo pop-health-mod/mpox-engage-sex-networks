@@ -1,0 +1,163 @@
+---
+title: "table1"
+author: "Vanessa Xiu"
+date: "2023-04-18"
+output: html_document
+---
+# preliminary
+
+```{r}
+# library and data -------------
+library(boot) 
+library(table1)
+library(tidyverse)
+library(scales)
+library(kableExtra)
+source("./src/utils_helper.R")
+data <- read_csv("./data-3cities-feb-2023/engage_baseline_3cities.csv")
+
+# data cleaning and formating ------------------
+## create dummy variables
+# age; reference is 18-29
+data <- make_ind_age(data)
+# table(data$city, data$age_grp, useNA = "ifany")
+
+# partnership status
+data <- make_ind_rel(data)
+# table(data$city, data$rel_status, useNA = "ifany")
+
+# check SPVs and groupsex
+# table(data$city, data$p6m_bathhouse, useNA = "ifany")
+# table(data$city, data$p6m_party_dark_blackout, useNA = "ifany")
+
+# format apps variable (assume NAs are no)
+# NOTE: apps variable not present in FU visit
+# table(data$city, data$apps_partn, useNA = "ifany")
+
+# format sex work variable (assume NAs are no)
+# table(data$city, data$sex_work, useNA = "ifany")
+
+# hiv status 
+# table(data$city,data$hiv_stat, useNA = "ifany")
+
+data_3cities <- data %>%
+  mutate(`City` = factor(city,
+                         levels = c("mtl", "trt", "van"),
+                           labels = c("Montreal", "Toronto", "Vancouver")),
+         `Age` = age_grp,
+        `Relationship status` = rel_status,
+        `Ethnicity` = ethnicity_cat,
+          `Income` = factor(income_level_cat, 
+                            levels = c("<20,000", "20,000-40,000", "40,000+"),
+                            labels = c("less than 20,000", "20,000-40,000", "more than 40,000")),
+        `Education` = education_level_cat,
+        `Transactional Sex` = factor(sex_work, levels = c("yes", "no", "PNA"), labels = c("Yes", "No", "NA")),
+         `HIV status` = factor(hiv_stat,
+                               levels = c(1, 0),
+                               labels = c("Seropositive", "Seronegative")),
+         `Groupsex` = factor(ifelse(is.na(p6m_party_dark_blackout) | p6m_party_dark_blackout == 9997, "NA", p6m_party_dark_blackout),
+                           levels = c(1, 0, "NA"),
+                           labels = c("Yes", "No", "NA")),
+         `Bathhouse` = factor(ifelse(is.na(p6m_bathhouse) | p6m_bathhouse %in% c(9997, 9999), "NA", p6m_bathhouse),
+                              levels = c(1, 0, "NA"),
+                              labels = c("Yes", "No", "NA")),
+         `Dating apps` = factor(ifelse(is.na(apps_partn), "NA", apps_partn),
+                              levels = c(1, 0, "NA"),
+                              labels = c("Yes", "No", "NA")),
+    `Number of all-type sex partners in P6M` = nb_part_ttl,
+    `Number of anal sex partners in P6M` = nb_part_anal)
+```
+
+
+# Table 1 (pre-pandemic only)
+```{r}
+# render Table 1 -----------
+rndr <- function(x, name, ...) {
+    if (!is.numeric(x)) return(render.categorical.default(x))
+    what <- switch(name,
+                   `Number of all-type sex partners in P6M` = "Mean (SD)",
+                   `Number of anal sex partners in P6M`  = "Mean (SD)")
+    parse.abbrev.render.code(c("", what))(x)
+}
+
+tab1_n <- table1(~ `Age` + `Relationship status` + `HIV status` + `Bathhouse` + `Groupsex` + `Dating apps` + `Transactional Sex` + `Number of all-type sex partners in P6M` + `Number of anal sex partners in P6M`| City, 
+                 data = data_3cities,
+                 render = rndr)
+tab1_n
+
+# tab1_n <- as.data.frame(tab1_n)
+# write.csv(tab1_n,"./output-3cities/negbin-ipcw/table1_n.csv")
+```
+
+# with rds
+
+```{r}
+data_list <- list()
+data_list[["data_3cities_pre"]] <- data_3cities
+
+# for(data in c("data_3cities_pre","data_3cities_pand","data_3cities_post")){
+for(data_name in c("data_3cities_pre")){
+  table_name = data_name
+  df <- data_list[[data_name]]
+  df_sum <- list()
+  df_count <- list()
+  df_sum_all <- list()
+  sum_n = nrow(df)
+  df <- df %>% mutate(city_n = case_when(city == "mtl" ~ nrow(df[df$city == "mtl", ]),
+                        city == "trt" ~ nrow(df[df$city == "trt", ]),
+                        city == "van" ~ nrow(df[df$city == "van", ])))
+
+for(var in c('Age', 'Ethnicity', 'Income', 'Education', 'Relationship status', 'HIV status', 'Bathhouse', 'Groupsex', 'Dating apps', 'Transactional Sex')){
+  df_sum[[var]] <- df %>%
+    group_by(city, get(var)) %>%
+    reframe(count = n(),
+              prop = n()/city_n,
+              mean = sum(wt_rds_norm)/city_n,
+              me = sqrt(mean*(1 - mean))/sqrt(city_n) * 1.96,
+              cl.lb = mean - me,
+              cl.ub = mean + me)%>%
+    unique() %>%
+    mutate_at(4:8,
+              percent,
+              accuracy = 1)%>%
+    mutate(variable = var,
+           count = paste(count,paste0("(",prop,")")),
+           rds = paste(mean,paste0("(",cl.lb,"-",cl.ub,")"))) %>%
+    dplyr::select(- c("prop", "me", "mean", "cl.lb", "cl.ub"))
+  
+  df_sum_all[[var]] <- df %>%
+    group_by(get(var)) %>%
+    reframe(count = n(),
+            prop = n()/sum_n,
+            mean = sum(wt_rds_norm)/sum_n,
+            me = sqrt(mean*(1 - mean))/sqrt(sum_n) * 1.96,
+            cl.lb = mean - me,
+            cl.ub = mean + me) %>%
+    unique() %>%
+    mutate_at(3:7,
+              percent,
+              accuracy = 1) %>%
+    mutate(variable = var,
+           count = paste(count, paste0("(",prop,")")),
+           rds = paste(mean, paste0("(",cl.lb,"-",cl.ub,")")))%>%
+    dplyr::select(- c("prop", "me", "mean", "cl.lb", "cl.ub"))
+}
+
+df_sum <- do.call(rbind.data.frame, df_sum)
+df_sum_all <- do.call(rbind.data.frame, df_sum_all)%>%
+  mutate(city = "Overall")
+df_rds <- rbind.data.frame(df_sum, df_sum_all) %>%
+  pivot_wider(names_from = city, values_from = c("count","rds")) %>%
+  relocate(variable, .before = 1)
+df_rds <- df_rds[, c(1:3,7,4,8,5,9,6,10)]
+table <- knitr::kable(df_rds, caption = table_name) %>% 
+  column_spec(3:4) %>% 
+  column_spec(5:6) %>% 
+  column_spec(7:8) %>%
+  column_spec(9:10)
+file = paste0("./figures-3cities/","summary_table_", table_name, ".png")
+save_kable(table,
+           file = file,
+           zoom = 1.5)}
+table
+```
