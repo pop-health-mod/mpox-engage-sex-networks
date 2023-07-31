@@ -2,34 +2,29 @@
 # libraries and functions
 library(tidyverse)
 library(lubridate)
-library(survival)
-library(survminer)
-library(gridExtra)
 
 theme_set(theme_bw())
 
-source("./src/utils.R")
 source("./src/utils_helper.R")
-source("./src/plot.R")
-source("./src/ipcw_engage.R")
+source("./src/utils_ipcw_engage.R")
 
-# key dates
-# urgence sanitaire declared on March 13
-# DATE_PAND_START <- as.Date("2020-03-13")%m+% months(3)
-# WHO declared a pandemic on March 11
-DATE_PAND_START <- as.Date("2020-03-11") %m+% months(3) #to account for recall period "P6M"
-DATE_RES_END <- as.Date("2021-09-07") %m+% months(3) #new measures for fully vaccinated international travellers to Canada came into force 
-#https://www.canada.ca/en/border-services-agency/news/2021/09/travel-advisory-reminder--on-september-7-new-measures-for-fully-vaccinated-international-travellers-to-canada-will-come-into-force.html
-# DATE_MPOX_START <- as.Date("2022-05-19") %m+% months(3)
-# DATE_MPOX_STABILIZED <- as.Date("2022-09-01")%m+% months(3)
+### key dates
+## WHO declared a pandemic on March 11
+# DATE_PAND_START <- as.Date("2020-03-11") %m+% months(3)
 
-## which variable to use as outcome
-outcome_var <- "nb_part_ttl" 
-file_suff <- case_when(outcome_var == "nb_part_ttl" ~ "p6m_all",
-                       outcome_var == "nb_part_new" ~ "p6m_new",
-                       outcome_var == "nb_part_anal" ~ "p6m_anal")
+## earliest Engage visits after pandemic declared in Q was June 17th 2020
+DATE_PAND_ENGAGE <- as.Date("2020-06-01")
 
-data_fu <- read_csv("./data-3cities-feb-2023/engage_visits_3cities.csv")
+## new measures for fully vaccinated international travellers to Canada came into force 
+# https://www.canada.ca/en/border-services-agency/news/2021/09/travel-advisory-reminder--on-september-7-new-measures-for-fully-vaccinated-international-travellers-to-canada-will-come-into-force.html
+# (shifted by 3 months to account for P6M recall period)
+DATE_RES_END <- as.Date("2021-09-07") %m+% months(3)
+
+# load data
+data_fu <- read_csv("../mpx-engage-params/data-3cities-feb-2023/engage_visits_3cities.csv")
+
+# check visits between March-June 2020
+# sort(unique(data_fu$date_intv[data_fu$date_intv >= "2020-03-01" & data_fu$date_intv <= "2020-06-30"]))
 
 # create city marker
 CITIES <- c("mtl", "trt", "van")
@@ -38,10 +33,146 @@ table(data_fu$city[data_fu$visit_num == 1], useNA = "ifany")
 ## date ranges for visits
 tapply(data_fu$date_intv, data_fu$visit_num, summary)
 
-# Restriction analysis ----
-## Get nb of participants with complete data ----
+# IPCW analysis (main analysis) ----
+## Create datasets for every time period ----
+## pre-pandemic time period
+data_fu_pre <- data_fu %>% 
+  group_by(part_id) %>%
+  subset(visit_num == 1) %>% 
+  mutate(time_pt = "Pre-Pandemic")
+sum(data_fu_pre$wt_rds_norm)
+length(unique(data_fu_pre$part_id))
+
+## pandemic time period
+data_fu_pand <- data_fu %>% 
+  # keep only visits after pandemic start and before restrictions end
+  filter(date_intv >= DATE_PAND_ENGAGE & date_intv < DATE_RES_END) %>%
+  # keep earliest visit available
+  group_by(part_id) %>% 
+  filter(date_intv == min(date_intv)) %>% 
+  mutate(time_pt = "Pandemic")
+
+# post-restrictions time period
+data_fu_post <- data_fu %>% 
+  # keep only visits after restrictions end
+  filter(date_intv >= DATE_RES_END) %>%
+  # keep oldest(?) visit available
+  group_by(part_id) %>% 
+  # mutate(post_date = max(date_intv)) %>% # TODO WHY THE OLDEST VISIT, WOULDN'T IT BE BETTER TO HAVE IT AS EARLIEST....?
+  filter(date_intv == max(date_intv)) %>% # TODO WHY THE OLDEST VISIT, WOULDN'T IT BE BETTER TO HAVE IT AS EARLIEST....?
+  mutate(time_pt = "Post-Restrictions")
+
+data_visit_key_date <- bind_rows(data_fu_pre, data_fu_pand, data_fu_post) #%>% 
+  # group_by(city, part_id) %>% 
+  # mutate_at(c("bath_m", "bath_d", 
+  #             "education_level_cat","income_level_cat", "ethnicity_cat", 
+  #             "groupsex_m", "groupsex_d", 
+  #             "sex_work_m", "sex_work_d"),
+  #           as.factor)
+
+## Retention rate ----
+# compute proportion retained at every time point
+tbl_retain <- data_visit_key_date %>% 
+  mutate(time_pt = factor(time_pt, levels = c("Pre-Pandemic", "Pandemic", "Post-Restrictions"))) %>% 
+  group_by(city, time_pt) %>% 
+  summarize(nb = n(), .groups = "drop_last") %>% 
+  mutate(prop = round(nb / max(nb) * 100)) %>% 
+  ungroup()
+
+# format proportion (apostrophe used to prevent excel from reading as negatives)
+tbl_retain <- tbl_retain %>% 
+  mutate(prop = sprintf("'(%s%%)", prop))
+
+# format to one column per city
+tbl_retain <- tbl_retain %>% 
+  pivot_wider(names_from = "city", values_from = c("nb", "prop")) %>% 
+  select(time_pt, ends_with("_mtl"), ends_with("_trt"), ends_with("_van"))
+
+write.csv(tbl_retain, "./out/manuscript-tables/table_S2_retention.csv", row.names = FALSE)
+
+# TODO check what this is
+# ???
+data_visit_key_date %>%
+  group_by(time_pt,city) %>%
+  summarise(count = n(),
+            normalized_rds_sum = sum(wt_rds_norm))
+
+## Compute IPCWs ----
+# lists to store each city's dataset with IPCWs
+ipcw_pand <- create_city_list()
+ipcw_post <- create_city_list()
+
+covariates <- c("apps_partn_m",
+                "apps_partn_d",
+                "rel_status",
+                "age", 
+                "hiv_stat",
+                "education_level_cat",
+                "income_level_cat",
+                "ethnicity_cat",
+                "sex_work_m",
+                "sex_work_d",
+                "nb_part_ttl") # variables associated with ltfu
+
+## check for LTFU and create indicator variable
+# check if it has a pandemic period visit
+data_ipcw_pand <- data_fu_pre %>% 
+  mutate(
+    ltfu = (part_id %in% unique(data_fu_pand$part_id))
+  )
+
+# check if it has a post-restrictions period visit
+data_ipcw_post <- data_fu_pre %>% 
+  mutate(
+    ltfu = (part_id %in% unique(data_fu_post$part_id))
+  )
+
+# for both datasets, transform variables
+data_ipcw_pand <- data_ipcw_pand %>% 
+  mutate(across(all_of(covariates), as.factor)) %>%
+  mutate(across(all_of(covariates), as.integer))
+data_ipcw_post <- data_ipcw_post %>% 
+  mutate(across(all_of(covariates), as.factor)) %>%
+  mutate(across(all_of(covariates), as.integer))
+
+## for-loops to generate IPCW weights
+for (cur_city in CITIES){
+  ipcw_pand <- compute_ipcw(cur_city, covariates,
+                            data_timept = data_ipcw_pand,
+                            data_list = ipcw_pand)
+}
+
+for (cur_city in CITIES){
+  ipcw_post <- compute_ipcw(cur_city, covariates,
+                            data_timept = data_ipcw_post,
+                            data_list = ipcw_pand)
+}
+
+# turn into a single dataset
+ipcw_pand <- do.call(bind_rows, ipcw_pand)
+ipcw_post <- do.call(bind_rows, ipcw_post)
+
+ipcw_pre <- data_visit_key_date %>%
+  subset(time_pt == "Pre-Pandemic") %>%
+  mutate(ipw_rds = wt_rds_norm)
+
+ipcw_pand <- merge.data.frame(data_visit_key_date, ipcw_pand, by = "part_id") %>%
+  subset(time_pt == "Pandemic")
+
+ipcw_post <- merge.data.frame(data_visit_key_date, ipcw_post, by = "part_id") %>%
+  subset(time_pt == "Post-Restrictions")
+
+# save datasets
+write.csv(ipcw_pre,"../mpx-engage-params/data-3cities-feb-2023/pre_ipcw_3cities.csv")
+write.csv(ipcw_pand,"../mpx-engage-params/data-3cities-feb-2023/pand_ipcw_3cities.csv")
+write.csv(ipcw_post,"../mpx-engage-params/data-3cities-feb-2023/post_ipcw_3cities.csv")
+
+
+### TODO CONTINUE HERE
+# Restriction analysis (sensitivity analysis) ----
+## Get number of participants with complete data ----
 data_visits <- data_fu %>% 
-  dplyr::select(city, part_id, visit_num, date_intv) %>% 
+  select(city, part_id, visit_num, date_intv) %>% 
   pivot_wider(names_from = visit_num, values_from = date_intv,
               names_prefix = "visit_")
 
@@ -60,10 +191,10 @@ data_visits %>%
 # (2) those in (1) AND with at least one data point in 2022
 data_visits <- data_visits %>% 
   mutate(
-    pand_vis = case_when(visit_2 >= DATE_PAND_START&visit_2 < DATE_RES_END | visit_3 >= DATE_PAND_START&visit_3 < DATE_RES_END |
-                           visit_4 >= DATE_PAND_START&visit_4 < DATE_RES_END | visit_5 >= DATE_PAND_START&visit_5 < DATE_RES_END |
-                           visit_6 >= DATE_PAND_START&visit_6 < DATE_RES_END | visit_7 >= DATE_PAND_START&visit_7 < DATE_RES_END |
-                           visit_8 >= DATE_PAND_START&visit_8 < DATE_RES_END | visit_9 >= DATE_PAND_START&visit_9 < DATE_RES_END ~ 1,
+    pand_vis = case_when(visit_2 >= DATE_PAND_ENGAGE&visit_2 < DATE_RES_END | visit_3 >= DATE_PAND_ENGAGE&visit_3 < DATE_RES_END |
+                           visit_4 >= DATE_PAND_ENGAGE&visit_4 < DATE_RES_END | visit_5 >= DATE_PAND_ENGAGE&visit_5 < DATE_RES_END |
+                           visit_6 >= DATE_PAND_ENGAGE&visit_6 < DATE_RES_END | visit_7 >= DATE_PAND_ENGAGE&visit_7 < DATE_RES_END |
+                           visit_8 >= DATE_PAND_ENGAGE&visit_8 < DATE_RES_END | visit_9 >= DATE_PAND_ENGAGE&visit_9 < DATE_RES_END ~ 1,
                          T ~ 0),
     post_vis = case_when(visit_2 >= DATE_RES_END | visit_3 >= DATE_RES_END |
                           visit_4 >= DATE_RES_END | visit_5 >= DATE_RES_END |
@@ -149,16 +280,16 @@ length(unique(data_res_post$part_id))
 
 ## data of the closest point after the pandemic
 data_res_pand <- data_res %>% 
-  filter(date_intv >= DATE_PAND_START & date_intv < DATE_RES_END) %>%
+  filter(date_intv >= DATE_PAND_ENGAGE & date_intv < DATE_RES_END) %>%
   group_by(part_id) %>%
   mutate(pand_date = min(date_intv)) %>%
   subset(date_intv == pand_date) %>%
   dplyr::select(-pand_date) %>%
   mutate(time_pt = "Pandemic", .before = 1)
 length(unique(data_res_pand$part_id))
-write_csv(data_res_pre,  "./data-3cities-feb-2023/restriction/res_pre.csv")
-write_csv(data_res_pand,  "./data-3cities-feb-2023/restriction/res_pand.csv")
-write_csv(data_res_post,  "./data-3cities-feb-2023/restriction/res_post.csv")
+write_csv(data_res_pre,  "../mpx-engage-params/data-3cities-feb-2023/restriction/res_pre.csv")
+write_csv(data_res_pand,  "../mpx-engage-params/data-3cities-feb-2023/restriction/res_pand.csv")
+write_csv(data_res_post,  "../mpx-engage-params/data-3cities-feb-2023/restriction/res_post.csv")
 
 # verify that visits don't overlap
 range(data_res_pre$date_intv)
@@ -170,135 +301,4 @@ data_res_fu <- rbind(data_res_pre,data_res_pand, data_res_post)
 table(visit = data_res_fu$time_pt, data_res_fu$city)
 
 # save dataset
-write_csv(data_res_fu,  "./data-3cities-feb-2023/restriction/res_fu.csv")
-
-# data with LTFU analysis  -----------------------------------------------------
-data_fu_pre <- data_fu %>% 
-  group_by(part_id) %>%
-  subset(visit_num == 1) %>% 
-  mutate(time_pt = "Pre-Pandemic")
-sum(data_fu_pre$wt_rds_norm)
-length(unique(data_fu_pre$part_id))
-
-data_fu_pand <- data_fu %>% 
-  group_by(part_id) %>%
-  subset(pand_vis == 1) %>% 
-  filter(date_intv >= DATE_PAND_START & date_intv < DATE_RES_END) %>%
-  group_by(part_id) %>%
-  mutate(pand_date = min(date_intv)) %>%
-  subset(date_intv == pand_date) %>%
-  dplyr::select(-pand_date) %>% 
-  mutate(time_pt = "Pandemic")
-
-data_fu_post <- data_fu %>% 
-  group_by(part_id) %>%
-  subset(post_vis == 1) %>% 
-  filter(date_intv >= DATE_RES_END) %>%
-  group_by(part_id) %>%
-  mutate(post_date = max(date_intv)) %>%
-  subset(date_intv == post_date)%>%
-  dplyr::select(-post_date)%>% 
-  mutate(time_pt = "Post-Restriction")
-
-data_visit_key_date <- rbind.data.frame(data_fu_pre,data_fu_pand,data_fu_post) %>%
-  group_by(city,part_id) %>%
-  mutate_at(c("bath_m", "bath_d", 
-              "education_level_cat","income_level_cat", "ethnicity_cat", 
-              "groupsex_m", "groupsex_d", 
-              "sex_work_m", "sex_work_d"),
-            as.factor)
-
-# retention rate
-table(data_visit_key_date$time_pt,
-      data_visit_key_date$city)
-
-data_visit_key_date %>%
-  group_by(time_pt,city) %>%
-  summarise(count = n(),
-            normalized_rds_sum = sum(wt_rds_norm))
-
-# full dataset analysis (add ipcw) --------------------------------------------------------------------
-ipcw_pand <- create_city_list()
-ipcw_post <- create_city_list()
-
-covariates <- c("apps_partn_m",
-                "apps_partn_d",
-               "rel_status",
-               "age", 
-               "hiv_stat",
-               "education_level_cat",
-               "income_level_cat",
-               "ethnicity_cat",
-               "sex_work_m",
-               "sex_work_d",
-               "nb_part_ttl") #variables associated with ltfu
-
-data_ipcw_pand <- data_fu_pre %>% #use baseline values of covariate
-  mutate_at(covariates, as.factor) %>%
-  mutate_at(covariates, as.integer) %>%
-  mutate(ltfu = as.logical(ifelse(pand_vis == 1,0,1)))
-
-data_ipcw_post<- data_fu_pre %>% #use baseline values of covariate
-  mutate_at(covariates, as.factor) %>%
-  mutate_at(covariates, as.integer) %>%
-  mutate(ltfu = as.logical(ifelse(post_vis == 1,0,1)))
-
-for (cur_city in CITIES){
-  data<-data_ipcw_pand[data_ipcw_pand$city == cur_city,]
-  covariates_include <- find.imbalance(data, covariates, weights = "wt_rds_norm")
-  data$ipw_rds <- make.ipcw(data, covariates_include, 'wt_rds_norm', 1) # determine capping weight
-  print(summary(data$ipw_rds))
-  print(calculate.smd(data, covariates_include,'ipw_rds'))
-  
-  #check that rds x ipcw sum to rds adj. numbers of participants (both for ltfu and non-ltfu separately), i.e. make sure that weighing does not inflate the sample size
-  data_ltfu <- data %>%
-    subset(ltfu == 1)
-  print(sum(data_ltfu$ipw_rds))
-  print(sum(data_ltfu$wt_rds_norm))
-  
-  data_fu <- data %>%
-    subset(ltfu == 0)
-  print(sum(data_fu$ipw_rds))
-  print(sum(data_fu$wt_rds_norm))
-  
-  ipcw_pand[[cur_city]]$part_id <- data$part_id
-  ipcw_pand[[cur_city]]$ipw_rds <- data$ipw_rds
-  
-}
-
-for (cur_city in CITIES){
-  data <- data_ipcw_post[data_ipcw_post$city == cur_city, ]
-  covariates_include <- find.imbalance(data, covariates, weights = "wt_rds_norm")
-  data$ipw_rds <- make.ipcw(data, covariates_include, 'wt_rds_norm', 1) #determine capping weight
-  
-  print(summary(data$ipw_rds))
-  print(calculate.smd(data, covariates_include, 'ipw_rds'))
-  
-  #check that rds x ipcw sum to rds adj. numbers of participants (both for ltfu and non-ltfu separately), i.e. make sure that weighing does not inflate the sample size
-  data_ltfu<-data %>%
-    subset(ltfu == 1)
-  print(sum(data_ltfu$ipw_rds))
-  print(sum(data_ltfu$wt_rds_norm))
-  
-  data_fu<-data %>%
-    subset(ltfu == 0)
-  print(sum(data_fu$ipw_rds))
-  print(sum(data_fu$wt_rds_norm))
-  
-  ipcw_post[[cur_city]]$part_id <- data$part_id
-  ipcw_post[[cur_city]]$ipw_rds <- data$ipw_rds
-  
-}
-ipcw_pand <- do.call(rbind.data.frame, ipcw_pand)
-ipcw_post <- do.call(rbind.data.frame, ipcw_post)
-ipcw_pre <- data_visit_key_date %>%
-  subset(time_pt == "Pre-Pandemic") %>%
-  mutate(ipw_rds = wt_rds_norm)
-ipcw_pand <- merge.data.frame(data_visit_key_date, ipcw_pand, by = "part_id") %>%
-  subset(time_pt == "Pandemic")
-ipcw_post <- merge.data.frame(data_visit_key_date, ipcw_post, by = "part_id") %>%
-  subset(time_pt == "Post-Restriction")
-
-# write.csv(ipcw_pre,"./data-3cities-feb-2023/pre_ipcw_3cities.csv")
-# write.csv(ipcw_pand,"./data-3cities-feb-2023/pand_ipcw_3cities.csv")
-# write.csv(ipcw_post,"./data-3cities-feb-2023/post_ipcw_3cities.csv")
+write_csv(data_res_fu,  "../mpx-engage-params/data-3cities-feb-2023/restriction/res_fu.csv")

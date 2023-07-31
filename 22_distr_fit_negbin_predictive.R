@@ -1,6 +1,15 @@
-# source code ---------------------------
-source("./21_distr_fit_negbin_coef.R")
-# get posterior predictive distribution ----
+# Libraries ----
+library(parallel)
+library(doParallel)
+library(foreach)
+
+# Source NB regression fit ----
+# only run if necessary
+if(!exists("fit_bayes_ls")){
+  source("./21_distr_fit_negbin_coef.R")
+}
+
+# Compute density for each participant (grouped) ----
 # get distribution of expected predictions
 # rows: iterations, columns: each individual's prediction (mean of the NB)
 data_ypred <- create_city_list(CITIES_DATAPTS)
@@ -20,8 +29,7 @@ numCores <- numCores - 1
 cl <- parallel::makeCluster(numCores, type = "PSOCK")
 
 # register
-doParallel::registerDoParallel(cl = cl) 
-# foreach::getDoParRegistered()
+doParallel::registerDoParallel(cl = cl)
 
 t0 <- Sys.time()
 for(cur_city in CITIES_DATAPTS){
@@ -37,11 +45,14 @@ for(cur_city in CITIES_DATAPTS){
   }
 }
 t1 <- Sys.time()
-t1 - t0 
+t1 - t0 # 1.81 mins
 
 # close cluster
 stopCluster(cl)
 
+# Probability mass function ----
+## Get posterior predictive distribution (PMF) ----
+# TODO are these notes still necessary?
 #   list                          list      matrix
 # density_list_by_iter[[city]][[iteration]][0:300, individuals]
 
@@ -49,8 +60,8 @@ stopCluster(cl)
 tmp_density <- create_city_list(CITIES_DATAPTS) # 4000 iterations per city-data_pt 
 dens_wt_by_city <- create_city_list(CITIES_DATAPTS)
 
+## compute the PMF
 t0 <- Sys.time()
-
 for(cur_city in CITIES_DATAPTS){
   cat(sprintf("%s\n", cur_city))
   # compute density in the city and visit
@@ -60,22 +71,66 @@ for(cur_city in CITIES_DATAPTS){
     nb_aggregate = filter(data_x_aggrt, data_pt == cur_city)$nb
   )
   
-  # # all densities should sum up to 1 (VERIFIED)
-  # tmp_density[[cur_city]] %>% group_by(iter) %>% summarize(dens_ttl = sum(dens_wt)) %>%
-  #   pull(dens_ttl) %>% unique() %>% print()
-  
   dens_wt_by_city[[cur_city]] <- summarize_density(tmp_density[[cur_city]], "dens_wt")
 }
-
 t1 <- Sys.time()
-t1 - t0 
+t1 - t0  # 4 mins
 
+# verify that all densities sum up to 1
+for(cur_city in CITIES_DATAPTS){
+  range_dens <- tmp_density[[cur_city]] %>% 
+    group_by(iter) %>% 
+    summarize(dens_ttl = sum(dens_wt)) %>%
+    pull(dens_ttl)
+  
+  # output density sums (range and median)
+  tabs_insert <- ifelse(grepl("Restrictions", cur_city), "\t", "\t\t")
+  
+  cat(
+    sprintf(
+      "%s%s%s\t\t%s\n", cur_city, tabs_insert,
+      paste(round(range(range_dens), 5), collapse = "-"),
+      round(mean(range_dens), 5)
+    )
+  )
+}
 
-# tail comparison ---------------------------------------------------------
+## Collapse PMF into single dataset ----
+# collapse each city
+for(cur_city in CITIES_DATAPTS){
+  dens_wt_by_city[[cur_city]]$data_pt <- cur_city
+}
+dens_wt_by_city <- bind_rows(dens_wt_by_city)
+
+# reorder to put city-time period first
+dens_wt_by_city <- dens_wt_by_city[, .(data_pt, y_pred, mean, mdn, cr.i_low, cr.i_upp)]
+
+dens_wt_by_city$data_pt <- factor(dens_wt_by_city$data_pt, levels = CITIES_DATAPTS)
+
+# Verify PMF posterior distributions ----
+# verify results by looking at the mean number of partners
+# TODO NEEDED.....?
+data_mean_nb_partn <- dens_wt_by_city %>%
+  group_by(data_pt) %>%
+  summarize(mean_wt = sum(y_pred * mean),
+            cr.i_low = sum(y_pred * cr.i_low),
+            cr.i_upp = sum(y_pred * cr.i_upp),
+            .groups = "drop") %>% 
+  mutate(type = "neg. bin.")
+
+data_mean_nb_partn
+
+# verify that weights sum up to 1
+dens_wt_by_city %>% 
+  group_by(data_pt) %>% 
+  summarize(dens_ttl = sum(mean), .groups = "drop")
+
+## tail comparison ---------------------------------------------------------
 
 degree <- 100  # comparing density of participants reporting at least x degree of partners
 
-# across timepoint comparison
+## across timepoint comparison
+# TODO parallelize and turn into function
 
 prop_by_city <- create_city_list(CITIES)
 
@@ -83,12 +138,13 @@ for(city_name in CITIES){
 
   prop_by_city[[city_name]] <- data.frame(pre_pand = 0, post_pand = 0, pre_post = 0)
 
+  # could parallelize here
   for(iter_num in 1:4000){
     cdf_city_pre <- sum(filter(tmp_density[[paste0(city_name, "-Pre-Pandemic")]],
                                iter == iter_num & y_pred >= degree)$dens_wt)
     cdf_city_pand <- sum(filter(tmp_density[[paste0(city_name, "-Pandemic")]],
                                 iter == iter_num & y_pred >= degree)$dens_wt)
-    cdf_city_post <- sum(filter(tmp_density[[paste0(city_name, "-Post-Restriction")]],
+    cdf_city_post <- sum(filter(tmp_density[[paste0(city_name, "-Post-Restrictions")]],
                                 iter == iter_num & y_pred >= degree)$dens_wt)
 
     prop_by_city[[city_name]]$pre_pand <- prop_by_city[[city_name]]$pre_pand + as.numeric(cdf_city_pre >= cdf_city_pand)
@@ -102,7 +158,6 @@ for(city_name in CITIES){
 }
 
 # across city comparison
-
 prop_by_timept <- create_city_list(TIMEPTS)
 
 for(time_pt_name in TIMEPTS){
@@ -126,41 +181,7 @@ for(time_pt_name in TIMEPTS){
   prop_by_timept[[time_pt_name]]$van_mtl <- prop_by_timept[[time_pt_name]]$van_mtl/4000
 }
 
-# collapse into single dataset --------------------------------------------
-# collapse each city
-
-for(cur_city in CITIES_DATAPTS){
-  dens_wt_by_city[[cur_city]]$data_pt <- cur_city
-}
-
-
-dens_wt_by_city <- bind_rows(dens_wt_by_city)
-
-# reorder to put city and relationship first
-dens_wt_by_city <- dens_wt_by_city[, .(data_pt, y_pred, mean, mdn, cr.i_low, cr.i_upp)]
-
-# verification of posterior distributions and densities ----
-# verify results by looking at the mean number of partners
-data_mean_nb_partn <- dens_wt_by_city %>%
-    group_by(data_pt) %>%
-    summarize(mean_wt = sum(y_pred * mean),
-              cr.i_low = sum(y_pred * cr.i_low),
-              cr.i_upp = sum(y_pred * cr.i_upp),
-              .groups = "drop") %>% 
-    mutate(type = "neg. bin.")
-
-data_mean_nb_partn$data_pt <- factor(data_mean_nb_partn$data_pt, levels = CITIES_DATAPTS)
-
-# verify that weights sum up to 1
-dens_wt_by_city %>% 
-  group_by(data_pt) %>% 
-  summarize(dens_ttl = sum(mean), .groups = "drop")
-
-# output tables (pmf and cdf) ----
-# full fitted distribution pmf
-write.csv(dens_wt_by_city, sprintf("./output-3cities/negbin-ipcw/full_fitted_pmf_wt_%s.csv", file_suff),
-          row.names = F)
-
+# Cumulative density function ----
 # compute fitted CDF in each datapoint (similar procedure as for pmf)
 # make lists to hold data for each city
 cdf_wt_by_city <- create_city_list(CITIES_DATAPTS)
@@ -179,7 +200,7 @@ for(cur_city in CITIES_DATAPTS){
   cdf_wt_by_city[[cur_city]] <- summarize_density(tmp_density, "cdf_wt")
 }
 t1 <- Sys.time()
-t1 - t0 
+t1 - t0 #  4.9 mins
 
 # collapse into single dataset
 for(cur_city in CITIES_DATAPTS){
@@ -194,14 +215,19 @@ cdf_wt_by_city <- cdf_wt_by_city[, .(data_pt, y_pred, mean, mdn, cr.i_low, cr.i_
 
 
 cdf_wt_by_city <- cdf_wt_by_city %>% 
-  mutate(city = gsub("-Pre-Pandemic|-Pandemic|-Post-Restriction", "", data_pt),
+  mutate(city = gsub("-Pre-Pandemic|-Pandemic|-Post-Restrictions", "", data_pt),
          time_pt = gsub("Montreal-|Toronto-|Vancouver-", "", data_pt),
          .before = 1)
 
 # factorize time points to order correctly
 cdf_wt_by_city$time_pt <- factor(cdf_wt_by_city$time_pt, 
-                                 levels = c("Pre-Pandemic", "Pandemic", "Post-Restriction"))
+                                 levels = c("Pre-Pandemic", "Pandemic", "Post-Restrictions"))
+
+# Output tables (PMF and CDF) ----
+# full fitted distribution pmf
+write.csv(dens_wt_by_city, "./out/fitted-distributions/pmf_weighted_all_partn.csv",
+          row.names = F)
 
 # save full fitted distribution
-write.csv(cdf_wt_by_city, sprintf("./output-3cities/negbin-ipcw/full_fitted_cdf_wt_%s.csv", file_suff),
+write.csv(cdf_wt_by_city, "./out/fitted-distributions/cdf_weighted_all_partn.csv",
           row.names = F)

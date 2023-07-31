@@ -1,7 +1,7 @@
 library(Rcpp)
-# sourceCpp("./code-3cities/negbin.cpp")
+## TODO CLEAN UP FILE (unused functions, clarify code)
 # Process observed data ----
-#'#' compute observed distribution
+#' compute observed distribution
 compute_density_obs <- function(data, var_city = "city",wt="wt_rds_norm"){
   # weighted and unweighted frequencies
   density_observed <- data %>% 

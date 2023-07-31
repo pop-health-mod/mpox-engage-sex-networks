@@ -1,55 +1,53 @@
-# library and data----
+# Library and data----
 library(tidyverse)
 library(data.table)
-library(parallel)
-library(doParallel)
-library(foreach)
-library(gridExtra)
-library(MCMCvis)
 library(rstan)
-library(ggtext)
 
-source("./src/utils_regression_3cities.R")
 source("./src/utils_helper.R")
-source("./src/plot.R")
+source("./src/utils_regression.R")
 set.seed(111)
 theme_set(theme_bw())
 
 ## which variable to use as outcome
-outcome_var <- "nb_part_ttl" 
-file_suff <- case_when(outcome_var == "nb_part_ttl" ~ "p6m_all",
-                       outcome_var == "nb_part_anal" ~ "p6m_anal")
-fig_path <- "./figures-3cities/negbin-ipcw"
+outcome_var <- "nb_part_ttl"
+fig_path <- "./fig/results-checks"
 
-data_3cities_pre_ipcw <- read_csv("./data-3cities-feb-2023/pre_ipcw_3cities.csv")
-data_3cities_pand_ipcw <- read_csv("./data-3cities-feb-2023/pand_ipcw_3cities.csv")
-data_3cities_post_ipcw <- read_csv("./data-3cities-feb-2023/post_ipcw_3cities.csv")
+data_3cities_pre_ipcw <- read_csv("../mpx-engage-params/data-3cities-feb-2023/pre_ipcw_3cities.csv")
+data_3cities_pand_ipcw <- read_csv("../mpx-engage-params/data-3cities-feb-2023/pand_ipcw_3cities.csv")
+data_3cities_post_ipcw <- read_csv("../mpx-engage-params/data-3cities-feb-2023/post_ipcw_3cities.csv")
 
-data_3cities <- data_3cities_pre_ipcw %>% 
-  bind_rows(data_3cities_pand_ipcw,data_3cities_post_ipcw) %>%
+# create single dataset with all time periods & cities
+data_3cities <- bind_rows(
+  data_3cities_pre_ipcw,
+  data_3cities_pand_ipcw,
+  data_3cities_post_ipcw
+) %>%
   mutate(time_pt = factor(time_pt, 
-                          levels = c("Pre-Pandemic", "Pandemic", "Post-Restriction"))) %>%
+                          levels = c("Pre-Pandemic", "Pandemic", "Post-Restrictions"))) %>%
   mutate(city = recode_factor(city, mtl = "Montreal", trt = "Toronto", van = "Vancouver"))
 
 # create city marker
 CITIES <- c("Montreal", "Toronto", "Vancouver")
-TIMEPTS <- c("Pre-Pandemic", "Pandemic", "Post-Restriction")
+TIMEPTS <- c("Pre-Pandemic", "Pandemic", "Post-Restrictions")
 
 table(data_3cities$time_pt, 
       data_3cities$city, 
       useNA = "ifany")
 
-data_3cities <- mutate(data_3cities, 
-                       data_pt = paste(city, time_pt, sep = "-"))
+data_3cities <- data_3cities %>% 
+  mutate(
+    data_pt = factor(paste(city, time_pt, sep = "-"),
+                     levels = paste(rep(CITIES, each = 3), TIMEPTS, sep = "-"))
+  )
 
 CITIES_DATAPTS <- paste(
   rep(CITIES, each = 3), 
-  rep(c("Pre-Pandemic", "Pandemic", "Post-Restriction"), 
+  rep(c("Pre-Pandemic", "Pandemic", "Post-Restrictions"), 
       times = 3), 
   sep = "-"
 )
 
-# could save time by aggregating individuals
+# save time by aggregating individuals
 # before computing Pr(Y = y) for 0 to 300
 nrow(data_3cities) # nb of individuals, could be the same person at different timepoints
 data_aggrt <- data_3cities %>% 
@@ -86,7 +84,7 @@ table(data_3cities$data_pt, data_3cities$sex_work_d, useNA = "ifany")
 table(data_3cities$data_pt, data_3cities$hiv_stat, useNA = "ifany")
 
 ### fit model
-negbin_model <- stan_model(file = "./src-stan/regression_negbin-1_aggregate.stan",
+negbin_model <- stan_model(file = "./src-stan/regression_negbin_aggregate.stan",
                            model_name = "negbin_partn")
 
 # variables to use (apps_partn_m and apps_partn_d are removed from FU since it was not asked)
@@ -108,9 +106,9 @@ data_x_aggrt <- data_3cities %>%
   summarize(nb = n(), 
             ipw_rds = sum(ipw_rds), 
             .groups = "drop") %>% 
-  dplyr::select(data_pt, nb, ipw_rds, all_of(vars_model_base))
+  select(data_pt, nb, ipw_rds, all_of(vars_model_base))
 
-num_cores <- detectCores()
+num_cores <- parallel::detectCores()
 t0 <- Sys.time()
 
 for(cur_city in CITIES_DATAPTS){
@@ -142,23 +140,44 @@ for(cur_city in CITIES_DATAPTS){
 }
 
 t1 <- Sys.time()
-t1 - t0 
+t1 - t0 # ~3 mins
 
-## Inspect model results ----
-# model convergence diagnostic
+## Inspect model convergence diagnostic ----
+# convergence of model chains (traceplots)
 for(cur_city in CITIES_DATAPTS){
-  MCMCtrace(fit_bayes_ls[[cur_city]], 
-            params = c("alpha", "beta", "phi"),
-            filename = paste0("traceplot-", cur_city),
-            wd = sprintf("./figures-3cities/negbin-ipcw/model-check%s", ifelse(file_suff == "p6m_all", "", "-anal-partn")),
-            open_pdf = F)
+  # MCMCtrace(fit_bayes_ls[[cur_city]], 
+  #           params = c("alpha", "beta", "phi"),
+  #           filename = paste0("traceplot-", cur_city),
+  #           wd = sprintf("%s/model-checks-p6m-all", fig_path),
+  #           open_pdf = F)
+  cur_p_trace_plot <- traceplot(fit_bayes_ls[[cur_city]], pars = c("alpha", "beta", "phi"))
+  ggsave(sprintf("%s/model-checks-p6m-all-%s-%s.png", fig_path, which(cur_city == CITIES_DATAPTS), cur_city),
+         cur_p_trace_plot, device = "png",
+         height = 14, width = 30, units = "cm", dpi = 320)
 }
+rm(cur_p_trace_plot)
 
-## coefficients ------------------------------------------------------------
-
-coeff_ls <- create_city_list(CITIES_DATAPTS)
-
+# r hat
 for(cur_city in CITIES_DATAPTS){
+  print(cur_city)
+  # get model
+  cur_model <- summary(fit_bayes_ls[[cur_city]])$summary
+  
+  # show only intercept and regression coefficients, ignore y_hat and y_pred
+  row_param_names <- rownames(cur_model)
+  row_param_names <- grep("alpha|beta|phi", row_param_names, value = T)
+  
+  # output
+  print(round(cur_model[row_param_names, ], 3))
+}
+rm(cur_model, row_param_names)
+
+## Regression coefficients (RR) ----
+## extract coefficients (only for post-restrictions period)
+coeff_ls <- vector("list", 3)
+names(coeff_ls) <- paste(CITIES, "-Post-Restrictions", sep = "")
+
+for(cur_city in names(coeff_ls)){
   coeff_ls[[cur_city]] <- as_tibble(
     summary(fit_bayes_ls[[cur_city]], pars = c("alpha", "beta", "phi"))$summary,
     rownames = "term"
@@ -171,19 +190,16 @@ for(cur_city in CITIES_DATAPTS){
 tbl_coeff <- bind_rows(coeff_ls)
 
 # add variable names
-vars_model_base_full <- c("Age 30-39", "Age 40-49", "Age 50-59", "Age ≥60", 
-                         "Exclusive Relationship", "Open Relationship", "Unclear Relationship", 
-                         "HIV Status", 
-                         "Bathhouse", "Bathhouse Missing",
-                         "Groupsex", "Groupsex Missing",
-                         "Dating Apps", "Dating Apps Missing",
-                         "Transactional Sex", "Transactional Sex Missing")
-vars_model_fu_full <- vars_model_base_full[!vars_model_base_full %in% c("Dating Apps", 
-                                                                        "Dating Apps Missing")]
+vars_model_fu_full <- c("Age 30-39", "Age 40-49", "Age 50-59", "Age ≥60", 
+                        "Exclusive Relationship", "Open Relationship", "Unclear Relationship", 
+                        "HIV Status", 
+                        "Bathhouse", "Bathhouse Missing",
+                        "Groupsex", "Groupsex Missing",
+                        # "Dating Apps", "Dating Apps Missing",
+                        "Transactional Sex", "Transactional Sex Missing")
+
 tbl_coeff <- add_column(tbl_coeff,
-                        name = rep(c("intercept", vars_model_base_full, "inverse_overdisp",
-                                     rep(c("intercept", vars_model_fu_full, "inverse_overdisp"),2)), 
-                                     times = 3),
+                        name = rep(c("intercept", vars_model_fu_full, "inverse_overdisp"), times = 3),
                         .after = "term")
 
 
@@ -191,25 +207,34 @@ tbl_coeff <- add_column(tbl_coeff,
 range(exp(tbl_coeff$`97.5%`))
 
 tbl_coeff <- tbl_coeff %>% 
-  mutate(name = factor(name, levels = unique(name))) %>%
-  mutate(city = gsub("-Pre-Pandemic|-Pandemic|-Post-Restriction", "", data_pt),
+  mutate(coeff = factor(name, levels = unique(name))) %>%
+  mutate(city = gsub("-Post-Restrictions", "", data_pt),
          time_pt = gsub("Montreal-|Toronto-|Vancouver-", "", data_pt),
          .before = 1) %>%
   mutate(time_pt = factor(time_pt, 
-                        levels = c("Pre-Pandemic", "Pandemic", "Post-Restriction")))
+                          levels = c("Pre-Pandemic", "Pandemic", "Post-Restrictions")))
 
-tbl_coeff_post <- tbl_coeff %>% subset(time_pt == "Post-Restriction")
+tbl_coeff_post <- tbl_coeff %>% filter(time_pt == "Post-Restrictions")
 
+# TODO VERIFY THAT TRANSFORMATIONS ARE CORRECT
 coeff_post_tbl <- tbl_coeff_post %>% 
-  dplyr::select(mean, city, time_pt, name, mean, se_mean, `2.5%`, `97.5%`) %>%
+  select(mean, city, time_pt, coeff, mean, se_mean, `2.5%`, `97.5%`) %>%
   mutate(SE = formatC(signif(se_mean,digits = 2), 
                       digits = 2,
                       format = "fg",
                       flag = "#"),
          Mean = paste0(round(exp(mean), 2), " (", round(exp(`2.5%`), 2), ", ", round(exp(`97.5%`), 2), ")")) %>%
-  dplyr::select(city, name, Mean, SE)
+  select(city, coeff, Mean, SE)
 
-coeff_post_tbl <- coeff_post_tbl[!coeff_post_tbl$name %in% c("Bathhouse Missing", "Groupsex Missing", "Dating Apps Missing", "Transactional Sex Missing"), ]
-  
+# turn into one set of columns per city
+coeff_post_tbl <- coeff_post_tbl %>% 
+  mutate(city_code = case_when(city == "Montreal" ~ "mtl",
+                               city == "Toronto" ~ "trt",
+                               city == "Vancouver" ~ "van")) %>% 
+  select(-city) %>% 
+  pivot_wider(names_from = "city_code", values_from = c("Mean", "SE"))
 
-# write.csv(coeff_post_tbl, "./output-3cities/negbin-ipcw/table_coef_post.csv")
+# reorder columns
+coeff_post_tbl <- coeff_post_tbl %>% select(coeff, ends_with("mtl"), ends_with("trt"), ends_with("van"))
+
+write.csv(coeff_post_tbl, "./out/manuscript-tables/table_S3_coef_post.csv")
