@@ -50,3 +50,4 @@ rsconnect/
 
 # figures to verify results, not to upload
 /fig/results-checks
+/out/fitted-*

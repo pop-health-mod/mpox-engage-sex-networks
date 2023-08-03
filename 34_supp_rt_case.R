@@ -6,22 +6,23 @@ library(gridExtra)
 
 theme_set(theme_bw())
 
-PROVS <- c("Quebec", "Ontario", "British Columbia")
-data_mpox <- read_csv("./misc-grant-app/data-case/monkeypox-detailed-2023june13.csv")
+## data for Rt estimation (only need the 3 concerned provinces)
+PROVS <- c("Québec", "Ontario", "British Columbia")
+data_mpox <- read_csv("../mpx-engage-params/misc-grant-app/data-case/monkeypox-detailed-2023june13.csv")
+data_mpox$reporting_pt_en[data_mpox$reporting_pt_en == "Quebec"] <- "Québec"
+
 data_mpox <- subset(data_mpox, reporting_pt_en %in% PROVS)
 
+# Rt estimation to assess outbreak trajectories ----
+## Data processing ----
+# rename variables
 data_mpox <- data_mpox %>% 
-  dplyr::select(pruid, prov_en = reporting_pt_en, prov_fr = reporting_pt_fr,
+  select(pruid, prov_en = reporting_pt_en, prov_fr = reporting_pt_fr,
          date, case_delta = num_confirmedcases_delta, case_cumul = num_confirmedcases_cumulative)
-
-# data_mpox[!is.na(data_mpox$case_delta) & data_mpox$case_delta < 0,] %>% view()
-# Note: on 2022-08-26. Ontario had case delta = -1. 
-# solution: fixed this in the original dataset by -1 from the previous case_delta and case_cumul. while change -1 to 0.
-# similarly, fixed Quebec on 2022-10-14, 2022-10-28
 
 data_mpox$prov_en <- factor(data_mpox$prov_en, levels = PROVS)
 
-# pad with 0's
+# pad with 0's for days without cases
 df_pad <- expand.grid(prov_en = PROVS, date = seq(min(data_mpox$date), max(data_mpox$date), by = "1 day"))
 df_pad <- left_join(df_pad,
                     unique(data_mpox[, c("pruid", "prov_en", "prov_fr")]),
@@ -30,12 +31,12 @@ df_pad <- left_join(df_pad,
 data_mpox <- full_join(data_mpox, df_pad, by = c("pruid", "prov_en", "prov_fr", "date")) %>% 
   arrange(prov_en, date)
 
+## keep only from day since first case up to 200 days after
 data_mpox %>% filter(!is.na(case_delta)) %>% group_by(prov_en) %>% summarize(min(date), max(date))
 data_mpox <- data_mpox %>% 
-  filter(prov_en == "Quebec"           & date >= "2022-04-28" & date <= as.Date("2022-04-28") + 200 |
+  filter(prov_en == "Québec"           & date >= "2022-04-28" & date <= as.Date("2022-04-28") + 200 |
          prov_en == "Ontario"          & date >= "2022-05-13" & date <= as.Date("2022-05-13") + 200 |
          prov_en == "British Columbia" & date >= "2022-05-25" & date <= as.Date("2022-05-25") + 200)
-
 
 data_mpox <- data_mpox %>% 
   # complete incidence
@@ -48,55 +49,14 @@ data_mpox <- data_mpox %>%
 # create dummy date
 data_mpox <- data_mpox %>% 
   group_by(pruid) %>% 
-  mutate(t_at_10 = case_when(case_cumul %in% 10:11 ~ date),
-         t_since_1 = as.integer(date - min(date)),
-         t_since_10 = as.integer(date - min(t_at_10, na.rm = T)),
-         .after = date) %>% 
-  dplyr::select(-t_at_10) %>% 
+  mutate(t_since_1 = as.integer(date - min(date)), .after = date) %>% 
   ungroup()
 
-# rolling average
-data_mpox <- data_mpox %>% 
-  group_by(pruid) %>% 
-  mutate(case_delta_wkly = zoo::rollmean(case_delta, k = 7, fill = NA)) %>% 
-  ungroup()
-
-# Plot incidence ----
-# calendar time
-p1 <- ggplot(data_mpox, aes(date, col = prov_en)) +
-  geom_point(aes(y = case_delta), size = 0.8, alpha = 0.5) +
-  geom_line(aes(y = case_delta_wkly)) +
-  labs(x = "Date", y = "Daily incidence") +
-  theme(legend.position = "none")
-
-# day since first case
-p2 <- ggplot(data_mpox, aes(t_since_1, col = prov_en)) +
-  geom_point(aes(y = case_delta), size = 0.8, alpha = 0.5) +
-  geom_line(aes(y = case_delta_wkly)) +
-  labs(x = "Days since first case", y = "Daily incidence") +
-  theme(legend.position = "none")
-
-# day since tenth case
-p3 <- ggplot(data_mpox, aes(t_since_10, col = prov_en)) +
-  geom_vline(xintercept = 0, linetype = "dashed") +
-  geom_point(aes(y = case_delta), size = 0.8, alpha = 0.5) +
-  geom_line(aes(y = case_delta_wkly)) +
-  labs(x = "Days since tenth case", y = "Daily incidence") +
-  theme(legend.position = "none")
-
-p_legend <- cowplot::get_legend(p1 + theme(legend.position = "right"))
-
-grid.arrange(p1, p2, p3, p_legend, ncol = 2)
-
-# from the above plot, 
-# it can be seen that the majority of cases happened in the first 200 days
-
-# Estimate Rt ----
+# Estimate Rt and plot ----
 window <- 14 # how much to smooth the Rt estimate
 
 data_rt <- vector("list", 3)
 for(i in 1:length(PROVS)){
-  # incid <- filter(data_mpox, prov_en == cur_prov, t_since_10 >= 0)
   incid <- filter(data_mpox, prov_en == PROVS[i])
   
   # define time windows over which to compute the Rt
@@ -127,7 +87,7 @@ data_rt <- bind_rows(data_rt) %>% as_tibble()
 # add dates (plot each estimate at the end of the window)
 df_time <- data_mpox %>% 
   mutate(t_end = t_since_1 + 1) %>% 
-  dplyr::select(prov_en, date, t_end)
+  select(prov_en, date, t_end)
 
 data_rt <- full_join(df_time, data_rt, by = c("prov_en", "t_end"))
 
@@ -135,7 +95,7 @@ data_rt <- full_join(df_time, data_rt, by = c("prov_en", "t_end"))
 data_rt$prov_en <- factor(data_rt$prov_en, levels = PROVS)
 
 # see when Rt stablizes
-png("./figures-3cities/negbin-ipcw/figS_rt.png",
+png("./fig/fig_S6_rt.png",
     width = 16, height = 12, units = "cm", res = 600)
 
 ggplot(data_rt, aes(x = t_end)) +
@@ -148,10 +108,9 @@ ggplot(data_rt, aes(x = t_end)) +
   theme(legend.position = "top") +
   scale_colour_viridis_d(option = "C", end = 0.8) +
   scale_fill_viridis_d(option = "C", end = 0.8) +
-  theme(plot.title.position = "plot",
-        plot.caption.position = "plot",
-        plot.caption = element_markdown(hjust = 0, size = 5.5))
-  # labs(caption = c("**Figure S2. Effective reproduction number (Rt) with 95% confidence interval in the province of Quebec, Ontario, and British Columbia.** Rt was estimated based on reported mpox <br> cases updated on June 13th, 2023, using the first 200 days since the first case was reported in each province and a time window of 14 days.")) 
+  theme(
+    legend.position = "none"
+  )
 
 dev.off()
 

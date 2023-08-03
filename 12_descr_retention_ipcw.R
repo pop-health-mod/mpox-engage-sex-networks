@@ -12,7 +12,7 @@ source("./src/utils_ipcw_engage.R")
 ## WHO declared a pandemic on March 11
 # DATE_PAND_START <- as.Date("2020-03-11") %m+% months(3)
 
-## earliest Engage visits after pandemic declared in Q was June 17th 2020
+## earliest Engage visits after pandemic declared was June 17th 2020
 DATE_PAND_ENGAGE <- as.Date("2020-06-01")
 
 ## new measures for fully vaccinated international travellers to Canada came into force 
@@ -56,19 +56,12 @@ data_fu_pand <- data_fu %>%
 data_fu_post <- data_fu %>% 
   # keep only visits after restrictions end
   filter(date_intv >= DATE_RES_END) %>%
-  # keep oldest(?) visit available
+  # keep oldest visit available
   group_by(part_id) %>% 
-  # mutate(post_date = max(date_intv)) %>% # TODO WHY THE OLDEST VISIT, WOULDN'T IT BE BETTER TO HAVE IT AS EARLIEST....?
-  filter(date_intv == max(date_intv)) %>% # TODO WHY THE OLDEST VISIT, WOULDN'T IT BE BETTER TO HAVE IT AS EARLIEST....?
+  filter(date_intv == max(date_intv)) %>% 
   mutate(time_pt = "Post-Restrictions")
 
-data_visit_key_date <- bind_rows(data_fu_pre, data_fu_pand, data_fu_post) #%>% 
-  # group_by(city, part_id) %>% 
-  # mutate_at(c("bath_m", "bath_d", 
-  #             "education_level_cat","income_level_cat", "ethnicity_cat", 
-  #             "groupsex_m", "groupsex_d", 
-  #             "sex_work_m", "sex_work_d"),
-  #           as.factor)
+data_visit_key_date <- bind_rows(data_fu_pre, data_fu_pand, data_fu_post)
 
 ## Retention rate ----
 # compute proportion retained at every time point
@@ -90,13 +83,6 @@ tbl_retain <- tbl_retain %>%
 
 write.csv(tbl_retain, "./out/manuscript-tables/table_S2_retention.csv", row.names = FALSE)
 
-# TODO check what this is
-# ???
-data_visit_key_date %>%
-  group_by(time_pt,city) %>%
-  summarise(count = n(),
-            normalized_rds_sum = sum(wt_rds_norm))
-
 ## Compute IPCWs ----
 # lists to store each city's dataset with IPCWs
 ipcw_pand <- create_city_list()
@@ -115,13 +101,13 @@ covariates <- c("apps_partn_m",
                 "nb_part_ttl") # variables associated with ltfu
 
 ## check for LTFU and create indicator variable
-# check if it has a pandemic period visit
+# check if participant has a pandemic period visit
 data_ipcw_pand <- data_fu_pre %>% 
   mutate(
     ltfu = (part_id %in% unique(data_fu_pand$part_id))
   )
 
-# check if it has a post-restrictions period visit
+# check if participant has a post-restrictions period visit
 data_ipcw_post <- data_fu_pre %>% 
   mutate(
     ltfu = (part_id %in% unique(data_fu_post$part_id))
@@ -135,7 +121,7 @@ data_ipcw_post <- data_ipcw_post %>%
   mutate(across(all_of(covariates), as.factor)) %>%
   mutate(across(all_of(covariates), as.integer))
 
-## for-loops to generate IPCW weights
+## generate IPCW weights for all cities
 for (cur_city in CITIES){
   ipcw_pand <- compute_ipcw(cur_city, covariates,
                             data_timept = data_ipcw_pand,
@@ -163,14 +149,14 @@ ipcw_post <- merge.data.frame(data_visit_key_date, ipcw_post, by = "part_id") %>
   subset(time_pt == "Post-Restrictions")
 
 # save datasets
-write.csv(ipcw_pre,"../mpx-engage-params/data-3cities-feb-2023/pre_ipcw_3cities.csv")
-write.csv(ipcw_pand,"../mpx-engage-params/data-3cities-feb-2023/pand_ipcw_3cities.csv")
-write.csv(ipcw_post,"../mpx-engage-params/data-3cities-feb-2023/post_ipcw_3cities.csv")
+write.csv(ipcw_pre,"../mpx-engage-params/data-3cities-feb-2023/pre_ipcw_3cities.csv", row.names = F)
+write.csv(ipcw_pand,"../mpx-engage-params/data-3cities-feb-2023/pand_ipcw_3cities.csv", row.names = F)
+write.csv(ipcw_post,"../mpx-engage-params/data-3cities-feb-2023/post_ipcw_3cities.csv", row.names = F)
 
 
-### TODO CONTINUE HERE
 # Restriction analysis (sensitivity analysis) ----
 ## Get number of participants with complete data ----
+# turn dataset into one row per participant, with columns for all visits
 data_visits <- data_fu %>% 
   select(city, part_id, visit_num, date_intv) %>% 
   pivot_wider(names_from = visit_num, values_from = date_intv,
@@ -189,33 +175,24 @@ data_visits %>%
 ### create indicators for each subgroups
 # (1) those with at least one data point in the pandemic (post March 2020)
 # (2) those in (1) AND with at least one data point in 2022
+names(data_visits)
 data_visits <- data_visits %>% 
   mutate(
-    pand_vis = case_when(visit_2 >= DATE_PAND_ENGAGE&visit_2 < DATE_RES_END | visit_3 >= DATE_PAND_ENGAGE&visit_3 < DATE_RES_END |
-                           visit_4 >= DATE_PAND_ENGAGE&visit_4 < DATE_RES_END | visit_5 >= DATE_PAND_ENGAGE&visit_5 < DATE_RES_END |
-                           visit_6 >= DATE_PAND_ENGAGE&visit_6 < DATE_RES_END | visit_7 >= DATE_PAND_ENGAGE&visit_7 < DATE_RES_END |
-                           visit_8 >= DATE_PAND_ENGAGE&visit_8 < DATE_RES_END | visit_9 >= DATE_PAND_ENGAGE&visit_9 < DATE_RES_END ~ 1,
-                         T ~ 0),
-    post_vis = case_when(visit_2 >= DATE_RES_END | visit_3 >= DATE_RES_END |
-                          visit_4 >= DATE_RES_END | visit_5 >= DATE_RES_END |
-                          visit_6 >= DATE_RES_END | visit_7 >= DATE_RES_END |
-                          visit_8 >= DATE_RES_END | visit_9 >= DATE_RES_END  ~ 1,
-                        T ~ 0))
-    # pre_mpox_vis = case_when(visit_2 >= DATE_RES_END&visit_2 < DATE_MPOX_START | visit_3 >= DATE_RES_END&visit_3 < DATE_MPOX_START |
-    #                            visit_4 >= DATE_RES_END&visit_4 < DATE_MPOX_START | visit_5 >= DATE_RES_END&visit_5 < DATE_MPOX_START |
-    #                            visit_6 >= DATE_RES_END&visit_6 < DATE_MPOX_START | visit_7 >= DATE_RES_END&visit_7 < DATE_MPOX_START |
-    #                            visit_8 >= DATE_RES_END&visit_8 < DATE_MPOX_START | visit_9 >= DATE_RES_END&visit_9 < DATE_MPOX_START ~ 1,
-    #                          T ~ 0),
-    # during_mpox_vis = case_when(visit_2 >= DATE_MPOX_START&visit_2 < DATE_MPOX_STABILIZED | visit_3 >= DATE_MPOX_START&visit_3 < DATE_MPOX_STABILIZED |
-    #                        visit_4 >= DATE_MPOX_START&visit_4 < DATE_MPOX_STABILIZED | visit_5 >= DATE_MPOX_START&visit_5 < DATE_MPOX_STABILIZED |
-    #                        visit_6 >= DATE_MPOX_START&visit_6 < DATE_MPOX_STABILIZED | visit_7 >= DATE_MPOX_START&visit_7 < DATE_MPOX_STABILIZED |
-    #                        visit_8 >= DATE_MPOX_START&visit_8 < DATE_MPOX_STABILIZED | visit_9 >= DATE_MPOX_START&visit_9 < DATE_MPOX_STABILIZED ~ 1,
-    #                      T ~ 0),
-    # post_mpox_vis = case_when(visit_2 >= DATE_MPOX_STABILIZED | visit_3 >= DATE_MPOX_STABILIZED |
-    #                        visit_4 >= DATE_MPOX_STABILIZED | visit_5 >= DATE_MPOX_STABILIZED |
-    #                        visit_6 >= DATE_MPOX_STABILIZED | visit_7 >= DATE_MPOX_STABILIZED |
-    #                        visit_8 >= DATE_MPOX_STABILIZED | visit_9 >= DATE_MPOX_STABILIZED  ~ 1,
-    #                      T ~ 0)) 
+    pand_vis = case_when(
+      visit_2 >= DATE_PAND_ENGAGE & visit_2 < DATE_RES_END | visit_3 >= DATE_PAND_ENGAGE & visit_3 < DATE_RES_END |
+      visit_4 >= DATE_PAND_ENGAGE & visit_4 < DATE_RES_END | visit_5 >= DATE_PAND_ENGAGE & visit_5 < DATE_RES_END |
+      visit_6 >= DATE_PAND_ENGAGE & visit_6 < DATE_RES_END | visit_7 >= DATE_PAND_ENGAGE & visit_7 < DATE_RES_END |
+      visit_8 >= DATE_PAND_ENGAGE & visit_8 < DATE_RES_END | visit_9 >= DATE_PAND_ENGAGE & visit_9 < DATE_RES_END ~ 1,
+      T ~ 0
+    ),
+    post_vis = case_when(
+      visit_2 >= DATE_RES_END | visit_3 >= DATE_RES_END |
+      visit_4 >= DATE_RES_END | visit_5 >= DATE_RES_END |
+      visit_6 >= DATE_RES_END | visit_7 >= DATE_RES_END |
+      visit_8 >= DATE_RES_END | visit_9 >= DATE_RES_END  ~ 1,
+      T ~ 0
+    )
+  )
 
 data_visits %>%
   filter(post_vis == 1 & pand_vis == 0) # note: 84 participants have post restriction visit but 
@@ -227,29 +204,15 @@ data_visits %>%
   summarize(n = n(), .groups = "drop_last") %>% 
   mutate(prop = n / sum(n)) %>% 
   filter(pand_vis == 1)
+
 data_visits %>% 
   group_by(city, post_vis) %>% 
   summarize(n = n(), .groups = "drop_last") %>% 
   mutate(prop = n / sum(n)) %>% 
   filter(post_vis == 1)
-# data_visits %>% 
-#   group_by(city, pre_mpox_vis) %>% 
-#   summarize(n = n(), .groups = "drop_last") %>% 
-#   mutate(prop = n / sum(n)) %>% 
-#   filter(pre_mpox_vis == 1)
-# data_visits %>% 
-#   group_by(city, during_mpox_vis) %>% 
-#   summarize(n = n(), .groups = "drop_last") %>% 
-#   mutate(prop = n / sum(n)) %>% 
-#   filter(during_mpox_vis == 1)
-# data_visits %>% 
-#   group_by(city, post_mpox_vis) %>% 
-#   summarize(n = n(), .groups = "drop_last") %>% 
-#   mutate(prop = n / sum(n)) %>% 
-#   filter(post_mpox_vis == 1)
 
 data_fu <- full_join(
-  dplyr::select(data_visits, city, part_id, pand_vis, post_vis),
+  select(data_visits, city, part_id, pand_vis, post_vis),
   data_fu,
   by = c("city", "part_id")
 )
@@ -260,36 +223,50 @@ data_fu <- full_join(
 data_res <- filter(data_fu, post_vis == 1 & pand_vis == 1) 
 length(unique(data_res$part_id))
 
-## baseline data 
+## create data.frame for baseline data 
 data_res_pre <- data_res %>% 
   group_by(part_id) %>%
   subset(visit_num == 1) %>%
   mutate(time_pt = "Pre-Pandemic", .before = 1)
-length(unique(data_res_pre$part_id))
 
-## data of the most recent point after the post restriction
-## note: used most recent visit to capture post restriction behaviour
-data_res_post <- data_res %>% 
-  filter(date_intv >= DATE_RES_END)  %>%
-  group_by(part_id) %>%
-  mutate(post_date = max(date_intv)) %>%
-  subset(date_intv == post_date)%>%
-  dplyr::select(-post_date) %>%
-  mutate(time_pt = "Post-Restriction", .before = 1)
-length(unique(data_res_post$part_id))
+length(unique(data_res_pre$part_id))
 
 ## data of the closest point after the pandemic
 data_res_pand <- data_res %>% 
-  filter(date_intv >= DATE_PAND_ENGAGE & date_intv < DATE_RES_END) %>%
-  group_by(part_id) %>%
-  mutate(pand_date = min(date_intv)) %>%
-  subset(date_intv == pand_date) %>%
-  dplyr::select(-pand_date) %>%
+  filter(date_intv >= DATE_PAND_ENGAGE & date_intv < DATE_RES_END) %>% 
+  group_by(part_id) %>% 
+  filter(date_intv == min(date_intv)) %>% 
   mutate(time_pt = "Pandemic", .before = 1)
+
+# verify that the same visits as in IPCW are used
 length(unique(data_res_pand$part_id))
-write_csv(data_res_pre,  "../mpx-engage-params/data-3cities-feb-2023/restriction/res_pre.csv")
-write_csv(data_res_pand,  "../mpx-engage-params/data-3cities-feb-2023/restriction/res_pand.csv")
-write_csv(data_res_post,  "../mpx-engage-params/data-3cities-feb-2023/restriction/res_post.csv")
+ipcw_pand %>% 
+  select(part_id, city, date_ipcw = date_intv) %>% 
+  right_join(select(data_res_pand, part_id, date_restr = date_intv), by = "part_id") %>% 
+  # check for discrepancies
+  group_by(city) %>% 
+  summarize(nb = n(), nb_dates_same = sum(date_ipcw == date_restr), nb_dates_diff = sum(date_ipcw != date_restr))
+
+## data of the most recent point after the post restriction
+# note: used most recent visit to capture post restriction behaviour
+data_res_post <- data_res %>% 
+  filter(date_intv >= DATE_RES_END)  %>%
+  group_by(part_id) %>%
+  filter(date_intv == max(date_intv)) %>%
+  mutate(time_pt = "Post-Restrictions", .before = 1)
+
+# verify that the same visits as in IPCW are used
+length(unique(data_res_post$part_id))
+ipcw_post %>% 
+  select(part_id, city, date_ipcw = date_intv) %>% 
+  right_join(select(data_res_post, part_id, date_restr = date_intv), by = "part_id") %>% 
+  # check for discrepancies
+  group_by(city) %>% 
+  summarize(nb = n(), nb_dates_same = sum(date_ipcw == date_restr), nb_dates_diff = sum(date_ipcw != date_restr))
+
+write.csv(data_res_pre,  "../mpx-engage-params/data-3cities-feb-2023/restriction/res_pre.csv", row.names = F)
+write.csv(data_res_pand,  "../mpx-engage-params/data-3cities-feb-2023/restriction/res_pand.csv", row.names = F)
+write.csv(data_res_post,  "../mpx-engage-params/data-3cities-feb-2023/restriction/res_post.csv", row.names = F)
 
 # verify that visits don't overlap
 range(data_res_pre$date_intv)

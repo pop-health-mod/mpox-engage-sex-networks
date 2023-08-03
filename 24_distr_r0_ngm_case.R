@@ -7,13 +7,14 @@ theme_set(theme_bw())
 source("./src/utils_helper.R")
 
 ## degree distribution for NGM
-data_full <- read_csv("./out/fitted-distributions/full_fitted_pmf_wt_p6m_all.csv")
+data_full <- read_csv("./out/fitted-distributions/pmf_weighted_all_partn.csv")
 
 ## case data for R0 based on growth rate
 case_data <- read.csv("../mpx-engage-params/misc-grant-app/data-case/monkeypox-detailed-2023june13.csv")
+case_data$reporting_pt_en[case_data$reporting_pt_en == "Quebec"] <- "Québec"
 
 # only need the 3 concerned provinces
-PROVS <- c("Quebec", "Ontario", "British Columbia")
+PROVS <- c("Québec", "Ontario", "British Columbia")
 case_data <- case_data %>%
   subset(reporting_pt_en %in% PROVS)
 
@@ -286,7 +287,7 @@ case_data <- case_data %>%
 case_data_cutoff <- case_data %>% 
   filter(time_conti <= 50 & reporting_pt_en == "British Columbia" |
            time_conti <= 50 & reporting_pt_en == "Ontario" |
-           time_conti <= 50 & reporting_pt_en == "Quebec")
+           time_conti <= 50 & reporting_pt_en == "Québec")
 
 ## plot cumulative incidence and fitted log-growth rate
 png("./fig/fig_S2_cumul_incidence.png",
@@ -348,3 +349,5 @@ point_df <- do.call(rbind.data.frame, df_point) %>%
                                                   dataset == "data_age" ~ "Age-Standardized",
                                                   dataset == "data_anal" ~ "Anal Sexual Partners"),
                               Dataset = factor(Dataset, levels = c("Full", "Restricted", "Age-Standardized", "Anal Sexual Partners")))
+
+SAR_df

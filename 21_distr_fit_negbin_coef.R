@@ -216,7 +216,6 @@ tbl_coeff <- tbl_coeff %>%
 
 tbl_coeff_post <- tbl_coeff %>% filter(time_pt == "Post-Restrictions")
 
-# TODO VERIFY THAT TRANSFORMATIONS ARE CORRECT
 coeff_post_tbl <- tbl_coeff_post %>% 
   select(mean, city, time_pt, coeff, mean, se_mean, `2.5%`, `97.5%`) %>%
   mutate(SE = formatC(signif(se_mean,digits = 2), 

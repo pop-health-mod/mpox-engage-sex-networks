@@ -1,7 +1,5 @@
 # Library and data -------------
 library(tidyverse)
-# library(scales)
-# library(kableExtra)
 source("./src/utils_helper.R")
 data_3cities <- read_csv("../mpx-engage-params/data-3cities-feb-2023/engage_baseline_3cities.csv")
 
@@ -34,17 +32,9 @@ table(data_3cities$city,data_3cities$hiv_stat, useNA = "ifany")
 # turn into factors to ensure correct ordering and coding
 data_3cities <- data_3cities %>%
   mutate(
-    # city = factor(city,
-    #               levels = c("mtl", "trt", "van"),
-    #               labels = c("Montréal", "Toronto", "Vancouver")),
     rel_status = factor(rel_status,
                         levels = c("no relationship", "open", "exclusive", "unclear"),
                         labels = c("Single", "Open", "Exclusive", "Unclear")),
-    # `Ethnicity` = ethnicity_cat,
-    # `Income` = factor(income_level_cat, 
-    #                   levels = c("<20,000", "20,000-40,000", "40,000+"),
-    #                   labels = c("less than 20,000", "20,000-40,000", "more than 40,000")),
-    # `Education` = education_level_cat,
     sex_work = factor(sex_work, levels = c("yes", "no", "PNA"),
                       labels = c("Yes", "No", "Missing")),
     hiv_stat = factor(hiv_stat,
@@ -61,7 +51,7 @@ data_3cities <- data_3cities %>%
                         labels = c("Yes", "No", "Missing"))
   )
 
-# Table 1, unadjusted (pre-pandemic only) ----
+# Table 1, unadjusted & RDS (pre-pandemic only) ----
 ## Table for proportions ----
 # duplicate data to have outputs for 'overall' (the 3 cities combined)
 data_dbl <- bind_rows(

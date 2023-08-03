@@ -16,7 +16,7 @@ if(!exists("draw_df")){
 }
 
 # Plot R0 estimates -----
-# TODO: harmonize sizing with fig1
+# TODO: harmonize sizing with fig1, make function for plotting
 # only using full dataset
 draw_df_main <- filter(draw_df, dataset == "data_full" & time_pt == "Post-Restrictions")
 p_r0_main <- ggplot(draw_df_main, aes(x = SAR, y = r0, col = city)) +
@@ -33,11 +33,11 @@ p_r0_main <- ggplot(draw_df_main, aes(x = SAR, y = r0, col = city)) +
   geom_segment(data = filter(point_df, dataset == "data_full" & time_pt == "Post-Restrictions"),
                aes(x = SAR, xend = SAR, y = 0, yend = r0, col = city),
                linetype = "dashed",
-               size = 0.6) +
+               linewidth = 0.6) +
   geom_segment(data = filter(point_df, dataset == "data_full" & time_pt == "Post-Restrictions"),
                aes(x = 0, xend = SAR, y = r0, yend = r0, col = city),
                linetype = "dashed",
-               size = 0.6) +
+               linewidth = 0.6) +
   coord_cartesian(ylim = c(0, 4)) +
   
   # facet_wrap( ~ time_pt) +

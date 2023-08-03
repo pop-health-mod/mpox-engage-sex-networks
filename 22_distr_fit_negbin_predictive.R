@@ -1,7 +1,11 @@
 # Libraries ----
+library(tidyverse)
+library(data.table)
+library(gridExtra)
 library(parallel)
 library(doParallel)
 library(foreach)
+source("./src/plot.R")
 
 # Source NB regression fit ----
 # only run if necessary
@@ -52,7 +56,6 @@ stopCluster(cl)
 
 # Probability mass function ----
 ## Get posterior predictive distribution (PMF) ----
-# TODO are these notes still necessary?
 #   list                          list      matrix
 # density_list_by_iter[[city]][[iteration]][0:300, individuals]
 
@@ -109,7 +112,6 @@ dens_wt_by_city$data_pt <- factor(dens_wt_by_city$data_pt, levels = CITIES_DATAP
 
 # Verify PMF posterior distributions ----
 # verify results by looking at the mean number of partners
-# TODO NEEDED.....?
 data_mean_nb_partn <- dens_wt_by_city %>%
   group_by(data_pt) %>%
   summarize(mean_wt = sum(y_pred * mean),

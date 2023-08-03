@@ -10,8 +10,6 @@ theme_set(theme_bw())
 
 ## load main fitted results
 data_ipcw <- read_csv("./out/fitted-distributions/cdf_weighted_all_partn.csv")
-data_ipcw$time_pt[is.na(data_ipcw$time_pt)] <- "Post-Restrictions" ## RERUN FITTING AND DELETE
-data_ipcw$city <- gsub("s", "", data_ipcw$city)
 
 # format city and time point variables (for plotting)
 data_ipcw <- data_ipcw %>% 
