@@ -111,6 +111,8 @@ data_x_aggrt <- data_3cities %>%
 num_cores <- parallel::detectCores()
 t0 <- Sys.time()
 
+# doing the PMF computations in stan, we get only a [-0.000019  0.000112] difference in estimates
+# for Montreal-Pre-Pandemic
 for(cur_city in CITIES_DATAPTS){
   # tracker
   if( grepl("-Pre-Pandemic", cur_city) ){
@@ -130,17 +132,22 @@ for(cur_city in CITIES_DATAPTS){
                 # data on which model is fit
                 x = data_3cities[data_3cities$data_pt == cur_city, vars_model],
                 N = sum(data_3cities$data_pt == cur_city),
+                
                 # data to compute predictions
                 x_aggr = data_x_aggrt[data_x_aggrt$data_pt == cur_city, vars_model],
                 N_aggr = sum(data_x_aggrt$data_pt == cur_city),
-                K = length(vars_model)),
+                K = length(vars_model),
+                
+                # data for PMF and CDF
+                x_end = 300,
+                ipc_rds_w = data_x_aggrt$ipw_rds[data_x_aggrt$data_pt == cur_city]),
     cores = num_cores,
     chains = 2, iter = 4000
   )
 }
 
 t1 <- Sys.time()
-t1 - t0 # ~3 mins
+t1 - t0 # ~9 minutes (regression and PMF)
 
 ## Inspect model convergence diagnostic ----
 # convergence of model chains (traceplots)
