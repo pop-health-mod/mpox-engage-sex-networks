@@ -34,6 +34,11 @@ round_prop <- function(x){
   as.character(round(x * 100, 0))
 }
 
+# get absolute minimum
+abs_min <- function(x){
+  min( abs(x) )
+}
+
 # Miscellaneous ----
 # creates an empty 3-item list, one entry per city
 create_city_list <- function(list_names = CITIES){
