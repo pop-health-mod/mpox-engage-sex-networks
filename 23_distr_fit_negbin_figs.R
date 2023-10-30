@@ -8,6 +8,10 @@ source("./src/plot_config.R")
 
 theme_set(theme_bw())
 
+# whether to use log-log plots for the goodness-of-fit figure
+# or use natural scale for Y axis (X axis always in log scale)
+plot_S1_loglog <- TRUE
+
 ## load main fitted results
 data_ipcw <- read_csv("./out/fitted-distributions/cdf_weighted_all_partn.csv")
 
@@ -122,9 +126,37 @@ data_cdf_obs <- data_cdf_obs %>%
 data_cdf_obs <- data_cdf_obs %>% ungroup() # note: needs to be grouped up to now for sums to work as intended
 
 ### plot
-plot_cdf_fit(data_ipcw, "city", # plots fitted data
-             p_title = NULL,
-             outcome_type = "all") +
+# if plotting in log-log, pre-transform y values into log
+if(plot_S1_loglog){
+  # transform fitted CDF
+  data_ipcw <- data_ipcw %>% 
+    mutate(
+      mean = log(mean),
+      cr.i_low = log(cr.i_low),
+      cr.i_upp = log(cr.i_upp)
+    )
+  
+  # transform observed data
+  data_cdf_obs <- data_cdf_obs %>% 
+    mutate(
+      inv_cdf_wt = log(inv_cdf_wt)
+    )
+}
+
+# min and max to use in the Y axis
+if(plot_S1_loglog){
+  y_minmax <- log(c(10^-6.5, 1))
+} else {
+  y_minmax <- c(0, 1)
+}
+
+# check range for plotting
+range(data_ipcw$cr.i_low)
+range(data_ipcw$cr.i_upp)
+
+p_fit_check <- plot_cdf_fit(data_ipcw, "city", # plots fitted data
+                            p_title = NULL,
+                            outcome_type = "all") +
   
   # plot  observed data
   geom_step(data = data_cdf_obs,
@@ -137,7 +169,7 @@ plot_cdf_fit(data_ipcw, "city", # plots fitted data
   facet_grid(time_pt ~ city) +
   
   # formt
-  coord_cartesian(ylim = c(0, 1)) +
+  coord_cartesian(ylim = y_minmax) +
   scale_x_continuous(trans = scales::pseudo_log_trans(),
                      breaks = c(0, 10, 100, 300)) +
   
@@ -146,11 +178,22 @@ plot_cdf_fit(data_ipcw, "city", # plots fitted data
   # fix proportions of plot elements
   # adjust bold face, and caption position
   theme(
-    legend.position = "none",                               # not needed because of wrapping
+    legend.position = "none",                # not needed because of wrapping
     
     axis.title = element_text(size = 12),    # axis titles size
     axis.text = element_text(size = 10),     # axis text size
   )
+
+if(plot_S1_loglog){
+  # breaks
+  y_log_breaks <- c(1, .1, .01, 1e-4, 1e-6)
+  
+  p_fit_check <- p_fit_check +
+    scale_y_continuous(breaks = log(y_log_breaks),
+                       labels = y_log_breaks)
+}
+
+p_fit_check
 
 ggsave("./fig/fig_S1_cdf_model_fit_to_data.png",
        device = "png",
