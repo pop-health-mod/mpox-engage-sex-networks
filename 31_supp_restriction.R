@@ -13,7 +13,7 @@ theme_set(theme_bw())
 
 ## which variable to use as outcome
 outcome_var <- "nb_part_ttl" 
-fig_path <- "./fig/results-checks/restriction"
+fig_path <- "./fig/results-checks-restriction"
 
 # restriction analysis
 data_3cities <- read_csv("../mpx-engage-params/data-3cities-feb-2023/restriction/res_fu.csv")

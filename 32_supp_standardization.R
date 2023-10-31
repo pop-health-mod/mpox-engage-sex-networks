@@ -13,7 +13,7 @@ theme_set(theme_bw())
 
 ## which variable to use as outcome
 outcome_var <- "nb_part_ttl" 
-fig_path <- "./fig/results-checks/standard"
+fig_path <- "./fig/results-checks-standard"
 
 data_3cities_pre_ipcw <- read_csv("../mpx-engage-params/data-3cities-feb-2023/pre_ipcw_3cities.csv")
 data_3cities_pand_ipcw <- read_csv("../mpx-engage-params/data-3cities-feb-2023/pand_ipcw_3cities.csv")
