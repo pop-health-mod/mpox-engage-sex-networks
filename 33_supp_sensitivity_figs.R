@@ -17,7 +17,7 @@ data_ipcw <- read_csv("./out/fitted-distributions/cdf_weighted_all_partn.csv")
 # sensitivity analyses
 data_restr <- read_csv("./out/fitted-distr-sens-restrict/cdf_weighted_all_partn.csv")
 data_stand <- read_csv("./out/fitted-distr-sens-standard/cdf_weighted_all_partn.csv")
-data_anal <- read_csv("../mpx-engage-params/output-3cities/negbin-ipcw/full_fitted_cdf_wt_p6m_anal.csv")
+data_anal <- read_csv("./out/fitted-distr-sens-anal/cdf_weighted_all_partn.csv")
 
 data_anal$time_pt <- gsub("Restriction", "Restrictions", data_anal$time_pt)
 

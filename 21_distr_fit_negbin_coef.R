@@ -5,13 +5,33 @@ library(rstan)
 
 source("./src/utils_helper.R")
 source("./src/utils_regression.R")
-set.seed(111)
 theme_set(theme_bw())
 
-## which variable to use as outcome
+## main analyses
 outcome_var <- "nb_part_ttl"
-fig_path <- "./fig/results-checks"
 
+## sensitivity analysis with number of *anal* partners as outcome
+# outcome_var <- "nb_part_anal"
+
+## sensitivity analysis with zero-inflated negative binomial
+DO_ZINF <- FALSE
+
+## define paths & prefixes based on the analysis being done
+fig_path <- case_when(outcome_var == "nb_part_ttl" ~ "./fig/results-checks",
+                      outcome_var == "nb_part_anal" ~ "./fig/results-checks-anal",
+                      DO_ZINF ~ "./fig/results-checks-zinf")
+
+stan_model_path <- ifelse(DO_ZINF, "./src-stan/regression_negbin_zinf_aggregate.stan",
+                          "./src-stan/regression_negbin_aggregate.stan")
+
+out_distr_path <- case_when(outcome_var == "nb_part_ttl" ~ "./out/fitted-distributions",
+                            outcome_var == "nb_part_anal" ~ "./out/fitted-distr-sens-anal",
+                            DO_ZINF ~ "./out/fitted-distr-sens-zinf")
+out_distr_pref <- case_when(outcome_var == "nb_part_ttl" ~ "",
+                            outcome_var == "nb_part_anal" ~ "-anal",
+                            DO_ZINF ~ "-zinf")
+
+## load data
 data_3cities_pre_ipcw <- read_csv("../mpx-engage-params/data-3cities-feb-2023/pre_ipcw_3cities.csv")
 data_3cities_pand_ipcw <- read_csv("../mpx-engage-params/data-3cities-feb-2023/pand_ipcw_3cities.csv")
 data_3cities_post_ipcw <- read_csv("../mpx-engage-params/data-3cities-feb-2023/post_ipcw_3cities.csv")
@@ -84,7 +104,7 @@ table(data_3cities$data_pt, data_3cities$sex_work_d, useNA = "ifany")
 table(data_3cities$data_pt, data_3cities$hiv_stat, useNA = "ifany")
 
 ### fit model
-negbin_model <- stan_model(file = "./src-stan/regression_negbin_aggregate.stan",
+negbin_model <- stan_model(file = stan_model_path,
                            model_name = "negbin_partn")
 
 # variables to use (apps_partn_m and apps_partn_d are removed from FU since it was not asked)
@@ -173,7 +193,7 @@ for(cur_city in CITIES_DATAPTS){
   
   # show only intercept and regression coefficients, ignore y_hat and y_pred
   row_param_names <- rownames(cur_model)
-  row_param_names <- grep("alpha|beta|phi", row_param_names, value = T)
+  row_param_names <- grep("alpha|beta|phi|shape|zi", row_param_names, value = T)
   
   # output
   print(round(cur_model[row_param_names, ], 3))
@@ -263,4 +283,7 @@ coeff_post_tbl <- coeff_post_tbl %>%
 # reorder columns
 coeff_post_tbl <- coeff_post_tbl %>% select(coeff, ends_with("mtl"), ends_with("trt"), ends_with("van"))
 
-write.csv(coeff_post_tbl, "./out/manuscript-tables/table_S3_coef_post.csv")
+# only save coefficients of main analyses
+if(outcome_var == "nb_part_ttl" & !DO_ZINF){
+  write.csv(coeff_post_tbl, "./out/manuscript-tables/table_S3_coef_post.csv")
+}

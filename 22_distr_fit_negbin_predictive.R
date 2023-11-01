@@ -171,13 +171,15 @@ cdf_wt_by_city$time_pt <- factor(cdf_wt_by_city$time_pt,
                                  levels = c("Pre-Pandemic", "Pandemic", "Post-Restrictions"))
 
 # Output tables (PMF and CDF) ----
-# save iterations
-saveRDS(pmf_iter, "./out/pmf_stan_iterations.rds")
+# save iterations (only for main analyses)
+saveRDS(pmf_iter, sprintf("./out/pmf_stan_iterations%s.rds", out_distr_pref))
 
 # save full fitted pmf
-write.csv(pmf_wt_by_city, "./out/fitted-distributions/pmf_weighted_all_partn.csv",
+write.csv(pmf_wt_by_city,
+          sprintf("%s/pmf_weighted_all_partn.csv", out_distr_path),
           row.names = F)
 
 # save full fitted cdf
-write.csv(cdf_wt_by_city, "./out/fitted-distributions/cdf_weighted_all_partn.csv",
+write.csv(cdf_wt_by_city,
+          sprintf("%s/cdf_weighted_all_partn.csv", out_distr_path),
           row.names = F)
