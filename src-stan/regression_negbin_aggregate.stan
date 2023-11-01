@@ -29,14 +29,11 @@ model {
 }
 
 generated quantities {
-    int y_hat[N];                         // model posterior predictive distributions
+    // int y_hat[N];                         // model posterior predictive distributions
     vector[N_aggr] y_pred;                // model predicted means/expected values for each (group of) participant
-    // matrix[N_aggr, x_end+1] pmf_ind;      // predicted PMF based on regression results
-    // matrix[N_aggr, x_end+1] pmf_ind_wt;   // as above but weighted
     vector[x_end+1] pmf;                  // population-level (weighted) PMF
-    // vector[x_end+1] cdf;                  // population-level (weighted) CDF
     
-    y_hat = neg_binomial_2_log_rng(x * beta + alpha, phi);
+    // y_hat = neg_binomial_2_log_rng(x * beta + alpha, phi);
     
     // Compute PMF ----
     {
@@ -55,13 +52,6 @@ generated quantities {
         for(j in 0:x_end){ // nb: Stan is indexed at 1, we want to compute for x = {0,1,...,x_end}
           pmf_ind[i, j+1] = neg_binomial_2_log_lpmf(j | y_pred[i], phi);
         }
-        // vector[x_end+1] y_pred_rep;
-        // vector[x_end+1] phi_rep;
-        // for(j in 0:x_end){
-        //   y_pred_rep[j+1] = y_pred[i];
-        //   phi_rep[j+1] = phi;
-        // }
-        // pmf_ind[i, ] = neg_binomial_2_log_lpmf(0:x_end | y_pred_rep, phi_rep);
         
         pmf_ind_wt[i, ] = exp(pmf_ind[i, ]) * ipc_rds_w[i];
       }

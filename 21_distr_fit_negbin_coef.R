@@ -164,7 +164,8 @@ for(cur_city in CITIES_DATAPTS){
 }
 rm(cur_p_trace_plot)
 
-# r hat
+# r hat and effective sample size
+ess_ls <- create_city_list(CITIES_DATAPTS)
 for(cur_city in CITIES_DATAPTS){
   print(cur_city)
   # get model
@@ -176,8 +177,27 @@ for(cur_city in CITIES_DATAPTS){
   
   # output
   print(round(cur_model[row_param_names, ], 3))
+  
+  # save
+  ess_ls[[cur_city]] <- cur_model[row_param_names, c("mean", "se_mean", "2.5%", "50%", "97.5%", "n_eff")]
 }
 rm(cur_model, row_param_names)
+
+## effective sample size
+# save output for all coefficients
+ess_ls_tbl <- vector("list", length(ess_ls))
+for(i in 1:length(ess_ls)){
+  ess_ls_tbl[[i]] <- as_tibble(ess_ls[[i]], rownames = "coeff")
+  ess_ls_tbl[[i]] <- mutate(ess_ls_tbl[[i]], city.time = names(ess_ls)[i], .before = 1)
+}
+ess_tbl <- bind_rows(ess_ls_tbl)
+rm(ess_ls_tbl)
+
+write_csv(ess_tbl, "./out/stan_model_fit_ess.csv")
+
+# save summary by city & time period
+summarize_ess(ess_tbl, beta_only = F)
+summarize_ess(ess_tbl, beta_only = T)
 
 ## Regression coefficients (RR) ----
 ## extract coefficients (only for post-restrictions period)

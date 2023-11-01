@@ -39,6 +39,23 @@ abs_min <- function(x){
   min( abs(x) )
 }
 
+# summarize effective sample size from Stan coefficients in a tibble format
+summarize_ess <- function(df, beta_only = FALSE){
+  # display ESS only for the beta coefficients
+  if(beta_only){
+    df_coeff_names <- df$coeff
+    df <- df[grep("beta", df_coeff_names), ]
+  }
+  
+  # compute the summary stats for the ESS
+  df <- df %>% 
+    # group_by(city.time) %>% 
+    summarize(mean = mean(n_eff), median = median(n_eff), min = min(n_eff), max = max(n_eff),
+              .groups = "drop")
+  
+  return(df)
+}
+
 # Miscellaneous ----
 # creates an empty 3-item list, one entry per city
 create_city_list <- function(list_names = CITIES){
