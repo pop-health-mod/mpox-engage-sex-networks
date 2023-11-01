@@ -32,7 +32,11 @@ compute_grp_size <- function(pmf_estim_m, order_grps = FALSE){
   return(data_pmf_summ)
 }
 
-compute_r0_ngm <- function(pmf_estim_m, beta_range, run_par = FALSE){
+#' @param pfm_estim_m    PMF of the distribution of sexual partners in the P6M
+#' @param beta_range     range of per-partnership infection risks to use
+#' @param epsilon        assortativity coefficient
+compute_r0_ngm <- function(pmf_estim_m, beta_range, epsilon = 0.8,
+                           run_par = FALSE){
   if(run_par){
     library(dplyr)
   }
@@ -46,17 +50,22 @@ compute_r0_ngm <- function(pmf_estim_m, beta_range, run_par = FALSE){
   n = length(unique(data_pmf_summ$quant_grp)) # number of sexual activity groups
   
   # compute the contact rates
-  # c: number of sexual contacts per day (estimate from P6M data)
+  # c: number of sexual contacts per day (estimate from P6M data and adjusted to daily timescale)
   # d: proportion of the population in that sexual activity group
   contact <- data_pmf_summ %>% 
     transmute(c = y_mean / (6*30), d = qt)
   
   ## Disease parameters ----
+  si = 8.99              # estimate from literature
+  incub = 7.12           # estimate from literature
+  latent = incub - 2     # assume 2 days of pre-symptomatic transmission
+  duration = si - latent # latent and infectious periods add up to serial interval
+  
   # incubation period
-  v <- 1/(7.9)
+  v <- 1 / latent
   
   # disease duration
-  gamma <- 1/(17.3)
+  gamma <- 1 / duration
   
   ## Constituents of NGM ----
   R0 <- rep(-1, length(beta_range))
@@ -79,7 +88,6 @@ compute_r0_ngm <- function(pmf_estim_m, beta_range, run_par = FALSE){
   }
   
   ## Computation of NGM & R0 ----
-  # for(pt in data_pt_name){
   {
     # Transmission matrix T
     T_pt = matrix(0, m, m)
@@ -97,14 +105,28 @@ compute_r0_ngm <- function(pmf_estim_m, beta_range, run_par = FALSE){
     
     denom_pt = sum(c_pt * d_pt)
     
+    ## create assortative mixing matrix
+    # TODO coarsen the activity groups
+    # assortative
+    mix_assort <- diag(n)
+    
     #' the columns are in the order of E_i -> I_i -> E_i+1 ....
     #' where i is the sexual activity group
     for(beta in beta_range){
       for(i in 1:n){ 
         for(j in 1:n){
-          T_pt[2 * i - 1, 2 * j] <- c_pt[i] * d_pt[i] * c_pt[j] * beta / denom_pt
+          # transmission matrix using fully proportionate mixing
+          # T_pt[2 * i - 1, 2 * j] <- c_pt[i] * d_pt[i] * c_pt[j] * beta / denom_pt
+          
+          # transmission matrix using fully proportionate mixing
+          T_pt[2 * i - 1, 2 * j] <- beta * c_pt[i] * d_pt[i] * (1 / d_pt[j]) *
+            (
+              ( (c_pt[j] * d_pt[j] / denom_pt) * (1 - epsilon) ) + (mix_assort[i, j] * epsilon)
+            )
         }
       }
+      
+      # compute NGM using -E' * T * Sigma^-1 * E
       K_pt = -t(E) %*% T_pt %*% solve(Sigma) %*% E
       
       # verified that using NGM with large domain K_l = -T *sigma^-1
