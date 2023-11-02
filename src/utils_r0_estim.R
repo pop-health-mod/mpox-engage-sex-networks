@@ -1,24 +1,49 @@
-compute_grp_size <- function(pmf_estim_m, order_grps = FALSE){
+compute_grp_size <- function(pmf_estim_m, order_grps = FALSE,
+                             finer_categorization = TRUE){
   # create data.frame with a y_pred and a density column (PMF at Y=k)
   data_pmf_summ <- data.frame(y_pred = 0:(length(pmf_estim_m) - 1),
                               pmf_m = pmf_estim_m)
-  
+  if(!finer_categorization){
   # divide into 100 sexual activity groups
   for (j in 1:99) {
     i = 99 - j + 2
     data_pmf_summ <- data_pmf_summ %>%
       mutate(quant_grp = ifelse(y_pred <= 3 * i, paste0("grp_", i), quant_grp))
   }
-  
+
   data_pmf_summ <- data_pmf_summ %>%
     mutate(quant_grp = case_when(
       y_pred == 0         ~ "grp_1",
       TRUE ~ quant_grp))
   
+  group_num = 100
+  
+  }
+  else{
+  #  248 sexual activity groups, finer group (2 sexual partner number per group) for >= 25 partners
+  # (1 sexual partner number per group) for >= 100 partners
+  for (i in 300:100) {
+    index = i - 52
+    data_pmf_summ <- data_pmf_summ %>%
+      mutate(quant_grp = ifelse(y_pred <=  i, paste0("grp_", index), quant_grp))
+  }
+  for (i in 50:13) {
+    index = i - 3
+    data_pmf_summ <- data_pmf_summ %>%
+      mutate(quant_grp = ifelse(y_pred <  2 * i, paste0("grp_", index), quant_grp))
+  }
+  for (i in 8:0) {
+    index = i + 1
+    data_pmf_summ <- data_pmf_summ %>%
+      mutate(quant_grp = ifelse(y_pred <= 3 * i, paste0("grp_", index), quant_grp))
+  }
+    group_num = 248
+  }
+  
   # order groups for data inspection
   if(order_grps){
     data_pmf_summ$quant_grp <- factor(data_pmf_summ$quant_grp,
-                                      levels = paste0("grp_", 1:100))
+                                      levels = paste0("grp_", 1:group_num))
   }
   
   # add group density
@@ -36,7 +61,8 @@ compute_grp_size <- function(pmf_estim_m, order_grps = FALSE){
 #' @param beta_range     range of per-partnership infection risks to use
 #' @param epsilon        assortativity coefficient
 compute_r0_ngm <- function(pmf_estim_m, beta_range, epsilon = 0.8,
-                           run_par = FALSE){
+                           run_par = FALSE,
+                           finer = TRUE){
   if(run_par){
     library(dplyr)
   }
@@ -45,7 +71,7 @@ compute_r0_ngm <- function(pmf_estim_m, beta_range, epsilon = 0.8,
   ## Compute group densities ----
   # get contact rates and group density (dij = Nij/Nj where i is a sexual activity group, j is a city-timept)
   # pmf_estim_m <- data_pmf_city_timept[cur_iter, ] # delete??
-  data_pmf_summ <- compute_grp_size(pmf_estim_m, T)
+  data_pmf_summ <- compute_grp_size(pmf_estim_m, T, finer)
   
   n = length(unique(data_pmf_summ$quant_grp)) # number of sexual activity groups
   

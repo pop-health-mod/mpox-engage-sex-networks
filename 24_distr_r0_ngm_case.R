@@ -14,7 +14,7 @@ source("./src/utils_helper.R")
 data_pmf_iter <- readRDS("./out/pmf_stan_iterations.rds")
 
 # for troubleshooting with only point estimate
-# data_full <- read_csv("./out/fitted-distributions/pmf_weighted_all_partn.csv")
+data_full <- read_csv("./out/fitted-distributions/pmf_weighted_all_partn.csv")
 
 ## case data for R0 based on growth rate
 case_data <- read.csv("../mpx-engage-params/misc-grant-app/data-case/monkeypox-detailed-2023june13.csv")
@@ -35,7 +35,8 @@ CITIES <- c("Montreal", "Toronto", "Vancouver")
 beta_range <- unique( c( seq(0, 0.3, 0.1), seq(0.3, 0.5, 0.01), seq(0.5, 1, 0.1) ) )
 
 # list to store R0 results (post-restrictions)
-R0_ls_city <- create_city_list(CITIES)
+R0_ls_city <- list(grp100 = create_city_list(CITIES), 
+                grp248 = create_city_list(CITIES))
 
 # start a cluster
 numCores <- parallel::detectCores()
@@ -47,27 +48,31 @@ cl <- parallel::makeCluster(numCores, type = "PSOCK")
 doParallel::registerDoParallel(cl = cl)
 
 t0 <- Sys.time()
-for(cur_city in CITIES){
+for(categorization in c("grp100", "grp248")){
+  
+  for(cur_city in CITIES){
   print(cur_city)
   # create data-pt label and extract city PMF
-  data_pt <- paste(cur_city, "-Post-Restrictions", sep = "")
-  pmf_tmp <- data_pmf_iter[[data_pt]]
-  
-  R0_ls_city[[cur_city]] <-  foreach( cur_iter = 1:nrow(pmf_tmp) ) %dopar% {
-    compute_r0_ngm(
-      pmf_estim_m = pmf_tmp[cur_iter, ],
-      beta_range = beta_range,
-      run_par = TRUE
-    )
-  }
+  # data_pt <- paste(cur_city, "-Post-Restrictions", sep = "")
+  # pmf_tmp <- data_pmf_iter[[data_pt]]
+  # 
+  # R0_ls_city[[categorization]][[cur_city]] <-  foreach( cur_iter = 1:nrow(pmf_tmp) ) %dopar% {
+  #   compute_r0_ngm(
+  #     pmf_estim_m = pmf_tmp[cur_iter, ],
+  #     beta_range = beta_range,
+  #     run_par = TRUE,
+  #     finer = (categorization == "248"))
+  #   )
+  # }
   
   # troubleshooting code, only uses the point estimates
-  # R0_ls_city[[cur_city]] <-  compute_r0_ngm(
-  #   pmf_estim_m = data_full[data_full$data_pt == data_pt, ]$mean,
-  #   beta_range = beta_range,
-  #   run_par = FALSE
-  # )
-}
+  data_pt <- paste(cur_city, "-Post-Restrictions", sep = "")
+  R0_ls_city[[categorization]][[cur_city]] <-  compute_r0_ngm(
+    pmf_estim_m = data_full[data_full$data_pt == data_pt, ]$mean,
+    beta_range = beta_range,
+    run_par = FALSE,
+    finer = (categorization == "grp248"))
+}}
 t1 <- Sys.time()
 t1 - t0 # 1.03 hours
 
@@ -139,29 +144,32 @@ for (province in PROVS){
 
 # formula is (1 + lambda*D)(1 + lambda*D') where D: infectious period & D': 
 SI = 8.99
-D_apostr = (7.12 - 2)
+D_apostr = (7.12 - 2.5)
 D = SI - D_apostr
 
-r0_case <- (1 + lambda*D)*(1 + lambda*D_apostr)
+r0_case <- (1 + lambda * D) * (1 + lambda * D_apostr)
 round(r0_case, 2)
 
 # simplified formula, should roughly correspond but use above in main paper
-# round( (1 + lambda*SI) , 2)
+# round( (1 + lambda * SI) , 2)
 
 write.csv(r0_case, "./out/r0-estim-cases.csv", row.names = FALSE)
 
 # Estimate SAR and R0 given pre-pandemic sexual activity level -------
-SAR_by_city <- create_city_list(CITIES)
-R0_by_city <- create_city_list(CITIES)
+SAR_by_city <- list(grp100 = create_city_list(CITIES),
+                    grp248 = create_city_list(CITIES))
+R0_by_city <- list(grp100 = create_city_list(CITIES),
+                   grp248 = create_city_list(CITIES))
 
-for(cur_city in CITIES){
+for(categorization in c("grp100", "grp248")){
+  for(cur_city in CITIES){
   # SAR estimation and R0 CrI's ----
   
   ## Match the case R0 to the NGM R0 ----
   # arrange R0 results as [iterations, SAR] for the specified city
-  r0_mtx <- do.call(rbind, R0_ls_city[[cur_city]])
-  # r0_mtx <- R0_ls_city[[cur_city]] # for troubleshooting with only point esimate
-  
+  # r0_mtx <- do.call(rbind, R0_ls_city_248[[categorization]][[cur_city]])
+  r0_mtx <- R0_ls_city[[categorization]][[cur_city]] # for troubleshooting with only point esimate
+
   ### find closest point to match to case-based R0
   # get R0 from cases, keep only relevant city
   prov_keep <- case_when(grepl("Montreal", cur_city) ~ "Québec",
@@ -174,45 +182,52 @@ for(cur_city in CITIES){
   r0_mtx_diff <- r0_mtx - r0_case_city
   
   # find minimum in each iteration (row)
-  r0_mtx_mins <- apply(abs(r0_mtx_diff), 1, which.min) # comment out for troubleshooting w/ only pt estimate
+  # r0_mtx_mins <- apply(abs(r0_mtx_diff), 1, which.min) # comment out for troubleshooting w/ only pt estimate
   
   # for troubleshooting
-  # r0_mtx_mins <- which.min(abs(r0_mtx_diff))
+  r0_mtx_mins <- which.min(abs(r0_mtx_diff))
   
   # get the corresponding SARs
-  SAR_by_city[[cur_city]] <- tibble(city = cur_city,
-                                    iter = 1:nrow(r0_mtx), # comment out for troubleshooting w/ only pt estimate
-                                    SAR = beta_range[r0_mtx_mins])
+  SAR_by_city[[categorization]][[cur_city]] <- tibble( 
+                                    ngrp = categorization,
+                                    city = cur_city,
+                                    # iter = 1:nrow(r0_mtx), # comment out for troubleshooting w/ only pt estimate
+                                    SAR = beta_range[r0_mtx_mins]) 
   
   ## Get R0 values for plotting ----
   # get credible intervals
-  cred_l <- vector("double", ncol(r0_mtx))
-  cred_u <- vector("double", ncol(r0_mtx))
-  # cred_l <- r0_mtx # troubleshooting
-  # cred_u <- r0_mtx
+  # cred_l <- vector("double", ncol(r0_mtx))
+  # cred_u <- vector("double", ncol(r0_mtx))
   
-  for(i in 1:ncol(r0_mtx)){  # comment out for troubleshooting w/ only pt estimate
-    cred_l[i] <- quantile(r0_mtx[, i], .025)
-    cred_u[i] <- quantile(r0_mtx[, i], .975)
-  }
+  # troubleshooting
+  cred_l <- r0_mtx 
+  cred_u <- r0_mtx
+  
+  # for(i in 1:ncol(r0_mtx)){  # comment out for troubleshooting w/ only pt estimate
+  #   cred_l[i] <- quantile(r0_mtx[, i], .025)
+  #   cred_u[i] <- quantile(r0_mtx[, i], .975)
+  # }
   
   # create tibble with each city and time period
-  R0_by_city[[cur_city]] <- tibble(city = cur_city,
+  R0_by_city[[categorization]][[cur_city]] <- tibble(
+                                   ngrp = categorization,
+                                   city = cur_city,
                                    SAR = beta_range,
-                                   mean_r0 = colSums(r0_mtx) / nrow(r0_mtx),
-                                   # mean_r0 = r0_mtx, # troubleshooting
+                                   # mean_r0 = colSums(r0_mtx) / nrow(r0_mtx), 
+                                   mean_r0 = r0_mtx, # troubleshooting
                                    r0.l = cred_l,
                                    r0.u = cred_u)
     
-}
+}}
 rm(r0_mtx, r0_mtx_diff, r0_mtx_mins)
 
 ## Get CrI's for SAR ----
-df_sar <- bind_rows(SAR_by_city)
+# df_sar <- bind_rows(SAR_by_city)
+df_sar <- map_df(SAR_by_city, bind_rows) # troubleshoot
 
 # compute city-specific SAR
 df_sar_city <- df_sar %>% 
-  group_by(city) %>% 
+  group_by(ngrp, city) %>% 
   summarize(
     mean = mean(SAR),
     cr.i_low = quantile(SAR, .025),
@@ -221,7 +236,7 @@ df_sar_city <- df_sar %>%
 
 # compute average SAR
 df_sar_avg <- df_sar %>% 
-  # group_by(city) %>% 
+  group_by(ngrp) %>%
   summarize(
     city = "avg",
     mean = mean(SAR),
@@ -237,10 +252,12 @@ write.csv(df_sar_all, "./out/r0-estim-ngm/SAR_estimates.csv", row.names = FALSE)
 # Project R0 using estimated SAR ----
 # use point estimate
 SAR_avg <- df_sar_avg$mean
+names(SAR_avg) <- c("grp100", "grp248")
 SAR_avg
 
-# list to store R0 results (post-restrictions)
-R0_projected_ls <- create_city_list(CITIES)
+# list to store R0 results (pre-pandemic)
+R0_projected_ls <-  list(grp100 = create_city_list(CITIES), 
+                         grp248 = create_city_list(CITIES))
 
 # start a cluster
 numCores <- parallel::detectCores()
@@ -252,18 +269,26 @@ cl <- parallel::makeCluster(numCores, type = "PSOCK")
 doParallel::registerDoParallel(cl = cl)
 
 t0 <- Sys.time()
+for(categorization in c("grp100", "grp248")){
 for(cur_city in CITIES){
   print(cur_city)
   # create data-pt label and extract city PMF
   data_pt <- paste(cur_city, "-Pre-Pandemic", sep = "")
-  pmf_tmp <- data_pmf_iter[[data_pt]]
-  
-  R0_projected_ls[[cur_city]] <-  foreach( cur_iter = 1:nrow(pmf_tmp) ) %dopar% {
-    compute_r0_ngm(
-      pmf_estim_m = pmf_tmp[cur_iter, ],
-      beta_range = SAR_avg,
-      run_par = TRUE
-    )
+  # pmf_tmp <- data_pmf_iter[[data_pt]]
+  # 
+  # R0_projected_ls[[categorization]][[cur_city]] <-  foreach( cur_iter = 1:nrow(pmf_tmp) ) %dopar% {
+  #   compute_r0_ngm(
+  #     pmf_estim_m = pmf_tmp[cur_iter, ],
+  #     beta_range = SAR_avg,
+  #     run_par = TRUE)
+      
+  # troubleshooting code, only uses the point estimates
+  R0_projected_ls[[categorization]][[cur_city]] <-  compute_r0_ngm(
+        pmf_estim_m = data_full[data_full$data_pt == data_pt, ]$mean,
+        beta_range = SAR_avg[categorization],
+        run_par = TRUE,
+        finer = (categorization == "grp248"))
+    
   }
 }
 t1 <- Sys.time()
@@ -273,33 +298,43 @@ rm(data_pt, pmf_tmp)
 stopCluster(cl)
 
 ## Get point estim. and CrI ----
-df_r0_proj <- create_city_list(CITIES)
-
+df_r0_proj <- list(grp100 = create_city_list(CITIES), 
+                   grp248 = create_city_list(CITIES))
+for(categorization in c("grp100", "grp248")){
 for(cur_city in CITIES){
-  r0_mtx <- do.call(rbind, R0_projected_ls[[cur_city]])
+  # r0_mtx <- do.call(rbind, R0_projected_ls[[categorization]][[cur_city]])
+  r0_mtx <- df_r0_proj[[categorization]][[cur_city]] # for troubleshooting with only point esimate
   
   ## Get R0 values for plotting ----
-  # get credible intervals
-  cred_l <- vector("double", ncol(r0_mtx))
-  cred_u <- vector("double", ncol(r0_mtx))
+  # # get credible intervals 
+  # cred_l <- vector("double", ncol(r0_mtx))
+  # cred_u <- vector("double", ncol(r0_mtx))
   
-  for(i in 1:ncol(r0_mtx)){
-    cred_l[i] <- quantile(r0_mtx[, i], .025)
-    cred_u[i] <- quantile(r0_mtx[, i], .975)
-  }
+  # troubleshooting
+  cred_l <- r0_mtx 
+  cred_u <- r0_mtx
+  
+  # for(i in 1:ncol(r0_mtx)){ # comment out for troubleshooting w/ only pt estimate
+  #   cred_l[i] <- quantile(r0_mtx[, i], .025)
+  #   cred_u[i] <- quantile(r0_mtx[, i], .975)
+  # }
   
   # create tibble with each city and time period
-  df_r0_proj[[cur_city]] <- tibble(city = cur_city,
+  df_r0_proj[[categorization]][[cur_city]] <- tibble(ngrp = categorization,
+                                                     city = cur_city,
                                    SAR = SAR_avg,
-                                   mean_r0 = colSums(r0_mtx) / nrow(r0_mtx),
+                                   # mean_r0 = colSums(r0_mtx) / nrow(r0_mtx), 
+                                   mean_r0 = r0_mtx, # troubleshooting
                                    r0.l = cred_l,
                                    r0.u = cred_u)
   
-}
+}}
 
 ## R0 dataframes for plotting ----
-df_r0_ngm <- bind_rows(R0_by_city)
-df_r0_proj <- bind_rows(df_r0_proj)
+# df_r0_ngm <- bind_rows(R0_by_city)
+# df_r0_proj <- bind_rows(df_r0_proj)
+df_r0_ngm <- map_df(R0_by_city, bind_rows)
+df_r0_proj <- map_df(df_r0_proj, bind_rows)
 
 # save estimated NGM R0 and projected R0 using average SAR
 write.csv(df_r0_ngm, "./out/r0-estim-ngm/R0_estim_NGM.csv",
