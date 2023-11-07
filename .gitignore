@@ -52,3 +52,6 @@ rsconnect/
 /fig/results-checks
 /out/fitted-*
 /out/*.rds
+
+# temporary outputs
+/out-tmp/
