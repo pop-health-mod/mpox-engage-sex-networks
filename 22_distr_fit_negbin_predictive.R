@@ -62,62 +62,6 @@ pmf_wt_by_city %>%
   group_by(data_pt) %>% 
   summarize(dens_ttl = sum(mean), .groups = "drop")
 
-# Tail comparison ---------------------------------------------------------
-
-degree <- 100  # comparing density of participants reporting at least x degree of partners
-
-## across timepoint comparison
-# TODO parallelize and turn into function
-
-prop_by_city <- create_city_list(CITIES)
-
-for(city_name in CITIES){
-
-  prop_by_city[[city_name]] <- data.frame(pre_pand = 0, post_pand = 0, pre_post = 0)
-
-  # could parallelize here
-  for(iter_num in 1:4000){
-    cdf_city_pre <- sum(filter(tmp_density[[paste0(city_name, "-Pre-Pandemic")]],
-                               iter == iter_num & y_pred >= degree)$dens_wt)
-    cdf_city_pand <- sum(filter(tmp_density[[paste0(city_name, "-Pandemic")]],
-                                iter == iter_num & y_pred >= degree)$dens_wt)
-    cdf_city_post <- sum(filter(tmp_density[[paste0(city_name, "-Post-Restrictions")]],
-                                iter == iter_num & y_pred >= degree)$dens_wt)
-
-    prop_by_city[[city_name]]$pre_pand <- prop_by_city[[city_name]]$pre_pand + as.numeric(cdf_city_pre >= cdf_city_pand)
-    prop_by_city[[city_name]]$post_pand <- prop_by_city[[city_name]]$post_pand + as.numeric(cdf_city_post >= cdf_city_pand)
-    prop_by_city[[city_name]]$pre_post <- prop_by_city[[city_name]]$pre_post + as.numeric(cdf_city_pre >= cdf_city_post)
-  }
-
-  prop_by_city[[city_name]]$pre_pand <- prop_by_city[[city_name]]$pre_pand/4000
-  prop_by_city[[city_name]]$post_pand <- prop_by_city[[city_name]]$post_pand/4000
-  prop_by_city[[city_name]]$pre_post <- prop_by_city[[city_name]]$pre_post/4000
-}
-
-# across city comparison
-prop_by_timept <- create_city_list(TIMEPTS)
-
-for(time_pt_name in TIMEPTS){
-
-  prop_by_timept[[time_pt_name]] <- data.frame(trt_mtl = 0, trt_van = 0, van_mtl = 0)
-
-  for(iter_num in 1:4000){
-    cdf_mtl_timept <- sum(filter(tmp_density[[paste0("Montreal-", time_pt_name)]],
-                                 iter == iter_num & y_pred >= degree)$dens_wt)
-    cdf_trt_timept <- sum(filter(tmp_density[[paste0("Toronto-", time_pt_name)]],
-                                 iter == iter_num & y_pred >= degree)$dens_wt)
-    cdf_van_timept <- sum(filter(tmp_density[[paste0("Vancouver-", time_pt_name)]],
-                                 iter == iter_num & y_pred >= degree)$dens_wt)
-
-    prop_by_timept[[time_pt_name]]$trt_mtl <- prop_by_timept[[time_pt_name]]$trt_mtl + as.numeric(cdf_trt_timept >= cdf_mtl_timept)
-    prop_by_timept[[time_pt_name]]$trt_van <- prop_by_timept[[time_pt_name]]$trt_van + as.numeric(cdf_trt_timept >= cdf_van_timept)
-    prop_by_timept[[time_pt_name]]$van_mtl <- prop_by_timept[[time_pt_name]]$van_mtl + + as.numeric(cdf_van_timept >= cdf_mtl_timept)
-  }
-  prop_by_timept[[time_pt_name]]$trt_mtl <- prop_by_timept[[time_pt_name]]$trt_mtl/4000
-  prop_by_timept[[time_pt_name]]$trt_van <- prop_by_timept[[time_pt_name]]$trt_van/4000
-  prop_by_timept[[time_pt_name]]$van_mtl <- prop_by_timept[[time_pt_name]]$van_mtl/4000
-}
-
 # Cumulative density function ----
 # compute fitted CDF in each datapoint (similar procedure as for pmf)
 # make lists to hold data for each city
@@ -183,3 +127,85 @@ write.csv(pmf_wt_by_city,
 write.csv(cdf_wt_by_city,
           sprintf("%s/cdf_weighted_all_partn.csv", out_distr_path),
           row.names = F)
+
+# Tail comparison ---------------------------------------------------------
+
+# cut-off above which to compute the CDF for the comparisons
+# i.e., compute % of population reporting >=x degree of partners
+degree <- 100
+
+## within each city, compare
+# pandemic vs pre-,
+# post- vs pandemic, and
+# post- vs pre-
+cdf_comparison_by_city <- create_city_list(CITIES)
+
+for(city_name in CITIES){
+  # extract PMF iterations from Stan for each time point
+  pmf_pre <-  extract(fit_bayes_ls[[paste(city_name, "Pre-Pandemic", sep = "-")]], pars = "pmf")$pmf
+  pmf_pand <- extract(fit_bayes_ls[[paste(city_name, "Pandemic", sep = "-")]], pars = "pmf")$pmf
+  pmf_post <- extract(fit_bayes_ls[[paste(city_name, "Post-Restrictions", sep = "-")]], pars = "pmf")$pmf
+  
+  # compare for >=100 partners
+  cdf_comparison_by_city[[city_name]] <-  foreach( cur_iter = 1:nrow(pmf_pre) ) %dopar% {
+    compare_timepts(
+      pmf_1 = pmf_pre,
+      pmf_2 = pmf_pand,
+      pmf_3 = pmf_post,
+      degree_cutoff = 100
+    )
+  }
+  
+  # get the % in each comparison that returned TRUE
+  cdf_comparison_by_city[[city_name]] <- bind_rows(cdf_comparison_by_city[[city_name]])
+  
+  cdf_compare_summ <- apply(cdf_comparison_by_city, MARGIN = 2, mean)
+  
+  cdf_comparison_by_city[[city_name]] <- tibble(
+    city = city_name,
+    pre_pand = cdf_compare_summ["pre_pand"],
+    pand_post = cdf_compare_summ["pand_post"],
+    pre_post = cdf_compare_summ["pre_post"]
+  )
+  
+}
+rm(pmf_pre, pmf_pand, pmf_post)
+
+## within the 1st and 3rd time periods, compare
+# Toronto vs Montreal
+# Toronto vs Vancouver
+# Vancouver vs Montreal
+cdf_comparison_by_timept <- create_city_list(TIMEPTS)
+
+for(time_pt_name in TIMEPTS){
+  # extract PMF iterations from Stan for each time point
+  pmf_mtl <- extract(fit_bayes_ls[[paste("Montreal", time_pt_name, sep = "-")]], pars = "pmf")$pmf
+  pmf_tor <- extract(fit_bayes_ls[[paste("Toronto", time_pt_name, sep = "-")]], pars = "pmf")$pmf
+  pmf_van <- extract(fit_bayes_ls[[paste("Vancouver", time_pt_name, sep = "-")]], pars = "pmf")$pmf
+  
+  # compare for >=100 partners
+  cdf_comparison_by_timept[[time_pt_name]] <-  foreach( cur_iter = 1:nrow(pmf_pre) ) %dopar% {
+    compare_cities(
+      pmf_mtl = pmf_mtl,
+      pmf_tor = pmf_tor,
+      pmf_van = pmf_van,
+      degree_cutoff = 100
+    )
+  }
+  
+  # get the % in each comparison that returned TRUE
+  cdf_comparison_by_timept[[time_pt_name]] <- bind_rows(cdf_comparison_by_timept[[time_pt_name]])
+  
+  cdf_compare_summ <- apply(cdf_comparison_by_timept, MARGIN = 2, mean)
+  
+  # save results in final list
+  cdf_comparison_by_timept[[time_pt_name]] <- tibble(
+    time_pt = city_name,
+    mtl_tor = cdf_compare_summ["mtl_tor"],
+    van_tor = cdf_compare_summ["van_tor"],
+    mtl_van = cdf_compare_summ["mtl_van"]
+  )
+  
+}
+rm(pmf_mtl, pmf_tor, pmf_van)
+

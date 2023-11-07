@@ -1,42 +1,53 @@
-library(Rcpp)
-## TODO CLEAN UP FILE (unused functions, clarify code)
-# Process observed data ----
-#' compute observed distribution
-compute_density_obs <- function(data, var_city = "city",wt="wt_rds_norm"){
-  # weighted and unweighted frequencies
-  density_observed <- data %>% 
-    group_by(get(var_city), nb_part_ttl) %>% 
-    summarize(nb_ppl = n(), wt_sum = sum(get(wt)), .groups = "drop_last")
+# Comparison of CDF between fits ----
+# compares whether the specified tail section is bigger in pmf_b compared to pmf_a
+compare_pmf_tail <- function(pmf_a, pmf_b, degree_cutoff){
+  # first compute the size of the tail for both
+  cdf_over_a <- sum(pmf_a[degree_cutoff:length(pmf_a)])
+  cdf_over_b <- sum(pmf_b[degree_cutoff:length(pmf_b)])
   
-  names(density_observed)[names(density_observed) == "get(var_city)"] <- var_city
-  
-  # weighted and unweighted probabilities/densities
-  density_observed <- density_observed %>% 
-    mutate(pop = sum(nb_ppl), dens_un = nb_ppl / pop,
-           pop_wt = sum(wt_sum), dens_wt = wt_sum / pop_wt) %>% 
-    ungroup()
-  
-  return(density_observed[, c(var_city, "nb_part_ttl", "nb_ppl", "pop", "dens_un",
-                              "wt_sum", "pop_wt", "dens_wt")])
+  # then return whether cdf_1 is bigger than cdf_0
+  return( as.numeric(cdf_over_b > cdf_over_a) )
 }
 
-compute_density_obs_new <- function(data, var_city = "city",wt="wt_rds_norm"){
-  # weighted and unweighted frequencies
-  density_observed <- data %>% 
-    group_by(get(var_city), nb_part_new) %>% 
-    summarize(nb_ppl = n(), wt_sum = sum(get(wt)), .groups = "drop_last")
+# compare across the 3 different time points,
+# where 1: pre-pandemic time period
+#       2: pandemic time period
+#       3: post-restrictions time period
+compare_timepts <- function(pmf_1, pmf_2, pmf_3,
+                            degree_cutoff){
+  # first nb is the reference time period and second nb is the comparison
+  comparison_1_2 <- compare_pmf_tail(pmf_1, pmf_2, degree_cutoff)
+  comparison_2_3 <- compare_pmf_tail(pmf_2, pmf_3, degree_cutoff)
+  comparison_1_3 <- compare_pmf_tail(pmf_1, pmf_3, degree_cutoff)
   
-  names(density_observed)[names(density_observed) == "get(var_city)"] <- var_city
+  # organize comparisons
+  df <- data.frame(
+    pre_pand = comparison_1_2,   # did activity decrease during the pandemic?
+    pand_post = comparison_2_3,  # did activity increase after restrictions lifting?
+    pre_post = comparison_1_3    # did activity go back to pre-pandemic (after lifting)?
+  )
   
-  # weighted and unweighted probabilities/densities
-  density_observed <- density_observed %>% 
-    mutate(pop = sum(nb_ppl), dens_un = nb_ppl / pop,
-           pop_wt = sum(wt_sum), dens_wt = wt_sum / pop_wt) %>% 
-    ungroup()
-  
-  return(density_observed[, c(var_city, "nb_part_new", "nb_ppl", "pop", "dens_un",
-                              "wt_sum", "pop_wt", "dens_wt")])
+  return(df)
 }
+
+# compare across the 3 cities,
+compare_cities <- function(pmf_mtl, pmf_tor, pmf_van,
+                           degree_cutoff){
+  # first nb is the reference city and second nb is the comparison
+  comparison_mtl_tor <- compare_pmf_tail(pmf_mtl, pmf_tor, degree_cutoff)
+  comparison_van_tor <- compare_pmf_tail(pmf_van, pmf_tor, degree_cutoff)
+  comparison_mtl_van <- compare_pmf_tail(pmf_mtl, pmf_van, degree_cutoff)
+  
+  # organize comparisons
+  df <- data.frame(
+    mtl_tor = comparison_mtl_tor,   # was the tail 'fatter' in Toronto vs Montreal?
+    van_tor = comparison_van_tor,   #          "            in Toronto vs Vancouver?
+    mtl_van = comparison_mtl_van    #          "            in Vancouver vs Montreal?
+  )
+  
+  return(df)
+}
+
 # Regression result posterior checks ----
 #' turn posterior predictive distributions into a data.frame
 #' with a row per iteration and a column for each individual's prediction
