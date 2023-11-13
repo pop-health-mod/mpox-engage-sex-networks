@@ -24,21 +24,6 @@ df_r0_ngm$city[df_r0_ngm$city == "Montreal"] <- "Montréal"
 df_r0_proj$city[df_r0_proj$city == "Montreal"] <- "Montréal"
 df_sar$city[df_sar$city == "Montreal"] <- "Montréal"
 
-## RM ONCE RE-RAN
-# names(df_r0_ngm)[1] <- "city"
-# names(df_r0_proj)[1] <- "city"
-# names(df_sar)[1] <- "city"
-# 
-# names(df_r0_ngm)[3] <- "mean_r0"
-# names(df_r0_proj)[2] <- "mean_r0"
-
-# df_r0_ngm <- df_r0_ngm %>% 
-#   rename(r0.l = cr.i_low, 
-#          r0.u = cr.i_upp)
-# df_r0_proj <- df_r0_proj %>% 
-#   rename(r0.l = cr.i_low, 
-#          r0.u = cr.i_upp)
-
 ## Process data for plotting ----
 # add corresponding R0 from NGM (point estimate) to SAR dataframe
 df_sar_pt <- df_sar %>% 
