@@ -2,12 +2,14 @@
 # libraries and functions
 library(tidyverse)
 library(lubridate)
-
+library(survey)
+library(svyweight)
 theme_set(theme_bw())
 
 source("./src/utils_helper.R")
 source("./src/utils_ipcw_engage.R")
 
+select <- dplyr::select
 ### key dates
 ## WHO declared a pandemic on March 11
 # DATE_PAND_START <- as.Date("2020-03-11") %m+% months(3)
@@ -153,6 +155,15 @@ write.csv(ipcw_pre,"../mpx-engage-params/data-3cities-feb-2023/pre_ipcw_3cities.
 write.csv(ipcw_pand,"../mpx-engage-params/data-3cities-feb-2023/pand_ipcw_3cities.csv", row.names = F)
 write.csv(ipcw_post,"../mpx-engage-params/data-3cities-feb-2023/post_ipcw_3cities.csv", row.names = F)
 
+# effective sample size at baseline
+for (cur_city in CITIES){
+  city_data <- filter(ipcw_pre, city == cur_city)
+  city_design <- svydesign(id = ~1, 
+          data = city_data, 
+          weights= ~ipw_rds)
+  print(nrow(city_data))
+  print(eff_n(city_design))
+}
 
 # Restriction analysis (sensitivity analysis) ----
 ## Get number of participants with complete data ----
