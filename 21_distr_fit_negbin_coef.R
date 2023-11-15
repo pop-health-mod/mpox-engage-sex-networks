@@ -6,6 +6,7 @@ library(rstan)
 source("./src/utils_helper.R")
 source("./src/utils_regression.R")
 theme_set(theme_bw())
+seelct <- dplyr::select
 
 ## main analyses
 outcome_var <- "nb_part_ttl"
@@ -15,21 +16,30 @@ outcome_var <- "nb_part_ttl"
 
 ## sensitivity analysis with zero-inflated negative binomial
 DO_ZINF <- FALSE
+## to produce pmf of each age group for second model
+DO_AGE <- F
 
 ## define paths & prefixes based on the analysis being done
-fig_path <- case_when(outcome_var == "nb_part_ttl" ~ "./fig/results-checks",
-                      outcome_var == "nb_part_anal" ~ "./fig/results-checks-anal",
-                      DO_ZINF ~ "./fig/results-checks-zinf")
+fig_path <- case_when(DO_ZINF ~ "./fig/results-checks-zinf",
+                      DO_AGE ~ "./fig/results-checks-age",
+                      outcome_var == "nb_part_ttl" ~ "./fig/results-checks",
+                      outcome_var == "nb_part_anal" ~ "./fig/results-checks-anal"
+                      )
 
-stan_model_path <- ifelse(DO_ZINF, "./src-stan/regression_negbin_zinf_aggregate.stan",
-                          "./src-stan/regression_negbin_aggregate.stan")
+stan_model_path <- ifelse(DO_ZINF, "./src-stan/regression_negbin_zinf_aggregate.stan", 
+                          ifelse(DO_AGE, "./src-stan/regression_negbin_aggregate_age.stan", 
+                                 "./src-stan/regression_negbin_aggregate.stan"))
 
-out_distr_path <- case_when(outcome_var == "nb_part_ttl" ~ "./out/fitted-distributions",
+out_distr_path <- case_when(DO_ZINF ~ "./out/fitted-distr-sens-zinf",
+                            DO_AGE ~ "./out/fitted-distr-age",
+                            outcome_var == "nb_part_ttl" ~ "./out/fitted-distributions",
                             outcome_var == "nb_part_anal" ~ "./out/fitted-distr-sens-anal",
-                            DO_ZINF ~ "./out/fitted-distr-sens-zinf")
-out_distr_pref <- case_when(outcome_var == "nb_part_ttl" ~ "",
-                            outcome_var == "nb_part_anal" ~ "-anal",
-                            DO_ZINF ~ "-zinf")
+                            )
+out_distr_pref <- case_when(DO_ZINF ~ "zinf",
+                            DO_AGE ~ "age",
+                            outcome_var == "nb_part_ttl" ~ "all",
+                            outcome_var == "nb_part_anal" ~ "anal",
+                            )
 
 ## load data
 data_3cities_pre_ipcw <- read_csv("../mpx-engage-params/data-3cities-feb-2023/pre_ipcw_3cities.csv")
@@ -49,9 +59,11 @@ data_3cities <- bind_rows(
 # create city marker
 CITIES <- c("Montreal", "Toronto", "Vancouver")
 TIMEPTS <- c("Pre-Pandemic", "Pandemic", "Post-Restrictions")
-
+# TIMEPTS <- c("Post-Restrictions")
+AGES <- sort(unique(data_3cities$age_grp))
 table(data_3cities$time_pt, 
       data_3cities$city, 
+      data_3cities$age_grp,
       useNA = "ifany")
 
 data_3cities <- data_3cities %>% 
@@ -71,17 +83,21 @@ CITIES_DATAPTS <- paste(
 # before computing Pr(Y = y) for 0 to 300
 nrow(data_3cities) # nb of individuals, could be the same person at different timepoints
 data_aggrt <- data_3cities %>% 
-  count(data_pt, age_grp, rel_status,
+  group_by(age_grp) %>%
+  count(data_pt, rel_status,
         bath_m, bath_d,
         groupsex_m, groupsex_d, 
         apps_partn_m, apps_partn_d, 
         sex_work_m, sex_work_d)
-nrow(data_aggrt) # nb of individual prediction points
+
+if(DO_AGE){
+  count(data_aggrt, "age_grp")
+  } # nb of combinations of covariates for each age group (across all city-datapoint)
 
 # Fit Bayesian models ----
 
 ## create dummy variables
-# age; reference is 18-29
+# age; reference is 16-29
 data_3cities <- make_ind_age(data_3cities)
 
 # partnership status
@@ -121,18 +137,51 @@ vars_model_fu <- setdiff(vars_model_base,
 fit_bayes_ls <- create_city_list(CITIES_DATAPTS)
 
 # prepare data_frame for aggregate data points
+if(DO_AGE){
+df_x_aggrt_age <- data_3cities %>% 
+  split(.$age_grp)
+data_x_aggrt_age <- list()
+
+for(cur_city in CITIES_DATAPTS){
+  data_x_aggrt_age_cur_city <- list()
+    for(a in AGES){
+    cur_city_index <- df_x_aggrt_age[[a]]$data_pt == cur_city
+    cur_city_data <- df_x_aggrt_age[[a]][cur_city_index, ]
+    data_x_aggrt_age_cur_city[[a]] <- cur_city_data %>%
+      group_by(across(all_of(vars_model_base))) %>% 
+      summarize(nb = n(), 
+            ipw_rds = sum(ipw_rds), 
+            .groups = "drop") %>% 
+      select(nb, ipw_rds, all_of(vars_model_base))}
+  
+    cur_city_max_combo <- max(unname(unlist(lapply(data_x_aggrt_age_cur_city, nrow))))
+    
+    data_x_aggrt_age[[cur_city]] <- array(data = 0,
+                                          dim = c(length(AGES), cur_city_max_combo, ncol(data_x_aggrt_age_cur_city[[a]])),
+                                          dimnames = list(AGES, 1:cur_city_max_combo, colnames(data_x_aggrt_age_cur_city[[a]])))
+
+    for(a in AGES){
+
+      n_row <- nrow(data_x_aggrt_age_cur_city[[a]])
+      n_col <- ncol(data_x_aggrt_age_cur_city[[a]])
+      for(r in 1:n_row){
+        for(c in 1:n_col){
+          data_x_aggrt_age[[cur_city]][a, r, c] <- unname(unlist(data_x_aggrt_age_cur_city[[a]][r,c]))
+        }
+      }
+    }} 
+}else{
 data_x_aggrt <- data_3cities %>% 
   group_by(data_pt, across(all_of(vars_model_base))) %>% 
   summarize(nb = n(), 
             ipw_rds = sum(ipw_rds), 
             .groups = "drop") %>% 
-  select(data_pt, nb, ipw_rds, all_of(vars_model_base))
+  select(data_pt, nb, ipw_rds, all_of(vars_model_base))}
 
 num_cores <- parallel::detectCores()
 t0 <- Sys.time()
 
-# doing the PMF computations in stan, we get only a [-0.000019  0.000112] difference in estimates
-# for Montreal-Pre-Pandemic
+# for Pre-Pandemic
 for(cur_city in CITIES_DATAPTS){
   # tracker
   if( grepl("-Pre-Pandemic", cur_city) ){
@@ -145,25 +194,45 @@ for(cur_city in CITIES_DATAPTS){
   } else {
     vars_model <- vars_model_fu
   }
-  
+  if(DO_AGE){
   fit_bayes_ls[[cur_city]] <- sampling(
     negbin_model,
     data = list(y = filter(data_3cities, data_pt == cur_city)[[outcome_var]],
                 # data on which model is fit
                 x = data_3cities[data_3cities$data_pt == cur_city, vars_model],
                 N = sum(data_3cities$data_pt == cur_city),
-                
+                n_age = length(AGES),
                 # data to compute predictions
-                x_aggr = data_x_aggrt[data_x_aggrt$data_pt == cur_city, vars_model],
-                N_aggr = sum(data_x_aggrt$data_pt == cur_city),
+                x_aggr_age = data_x_aggrt_age[[cur_city]][, , vars_model],
+                N_aggr_age = dim(data_x_aggrt_age[[cur_city]])[2],
                 K = length(vars_model),
-                
+                # want equal number of combos in each age groups for each data_pt 
                 # data for PMF and CDF
                 x_end = 300,
-                ipc_rds_w = data_x_aggrt$ipw_rds[data_x_aggrt$data_pt == cur_city]),
+                ipc_rds_w_age = data_x_aggrt_age[[cur_city]][, , "ipw_rds"]),
     cores = num_cores,
     chains = 2, iter = 4000
-  )
+  )}else{
+    
+    fit_bayes_ls[[cur_city]] <- sampling(
+      negbin_model,
+      data = list(y = filter(data_3cities, data_pt == cur_city)[[outcome_var]],
+                  # data on which model is fit
+                  x = data_3cities[data_3cities$data_pt == cur_city, vars_model],
+                  N = sum(data_3cities$data_pt == cur_city),
+                  
+                  # data to compute predictions
+                  x_aggr = data_x_aggrt[data_x_aggrt$data_pt == cur_city, vars_model],
+                  N_aggr = sum(data_x_aggrt$data_pt == cur_city),
+                  K = length(vars_model),
+                  
+                  # data for PMF and CDF
+                  x_end = 300,
+                  ipc_rds_w = data_x_aggrt$ipw_rds[data_x_aggrt$data_pt == cur_city]),
+      cores = num_cores,
+      chains = 2, iter = 4000
+    )
+  }
 }
 
 t1 <- Sys.time()
@@ -213,7 +282,7 @@ for(i in 1:length(ess_ls)){
 ess_tbl <- bind_rows(ess_ls_tbl)
 rm(ess_ls_tbl)
 
-write_csv(ess_tbl, "./out/stan_model_fit_ess.csv")
+write_csv(ess_tbl, sprintf("./out/stan_model_fit_ess-%s.csv", out_distr_pref))
 
 # save summary by city & time period
 summarize_ess(ess_tbl, beta_only = F)
@@ -284,6 +353,6 @@ coeff_post_tbl <- coeff_post_tbl %>%
 coeff_post_tbl <- coeff_post_tbl %>% select(coeff, ends_with("mtl"), ends_with("trt"), ends_with("van"))
 
 # only save coefficients of main analyses
-if(outcome_var == "nb_part_ttl" & !DO_ZINF){
+if(outcome_var == "nb_part_ttl" & !DO_ZINF & !DO_AGE){
   write.csv(coeff_post_tbl, "./out/manuscript-tables/table_S3_coef_post.csv")
 }
