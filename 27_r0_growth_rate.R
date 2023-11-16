@@ -4,6 +4,10 @@ library(ggtext)
 
 theme_set(theme_bw())
 
+## mpox parameters
+D = 3.83        # infectious duration
+D_apostr = 5.1  # latency duration
+
 ## case data for R0 based on growth rate
 #     from PHAC, https://health-infobase.canada.ca/mpox/
 #     (use monkeypox-detailed.csv file)
@@ -29,6 +33,7 @@ case_data <- case_data %>%
     reporting_pt_en = factor(reporting_pt_en, level = PROVS)
   )
 
+## Main results (first 50 days) ----
 # cutoff data to use in growth rate estimation for R0
 cutoff <- 50
 case_data_cutoff <- case_data %>% 
@@ -68,21 +73,63 @@ names(lambda) <- PROVS
 for (province in PROVS){
   case_data_province <- case_data_cutoff %>% 
     subset(reporting_pt_en == province)
+  
+  # regression
   linear_model <- lm(formula = ln_cumu_cases ~ time_conti, case_data_province)
   # linear_model <- lm(formula = incid ~ time_conti, case_data_province)
+  
+  # growth rate
   lambda[[province]] <- linear_model$coefficients[2] %>%
     unname()
 }
 
-# formula is (1 + lambda*D)(1 + lambda*D') where D: infectious period & D': 
-SI = 8.99
-D_apostr = (7.12 - 2.5)
-D = SI - D_apostr
-
+# formula is (1 + lambda*D)(1 + lambda*D')
 r0_case <- (1 + lambda * D) * (1 + lambda * D_apostr)
 round(r0_case, 2)
 
-# simplified formula, should roughly correspond but use above in main paper
-# round( (1 + lambda * SI) , 2)
+r0_main <- data.frame(time_cutoff = rep(cutoff, 3), prov = names(r0_case), r0 = r0_case)
 
-write.csv(r0_case, "./out/r0-estim-cases.csv", row.names = FALSE)
+## Sensitivity (first 40 or 60 days) ----
+r0_sens <- vector("list", 2)
+sens_cutoffs <- c(40, 60)
+
+for(cur_cutoff in sens_cutoffs) {
+  # subset case data
+  case_tmp <- case_data %>% 
+    filter(time_conti <= cur_cutoff & reporting_pt_en == "British Columbia" |
+             time_conti <= cur_cutoff & reporting_pt_en == "Ontario" |
+             time_conti <= cur_cutoff & reporting_pt_en == "Québec")
+  
+  # compute growth rate and R0 in each province
+  lambda <- vector(mode = "numeric", 
+                   length = 3)
+  names(lambda) <- PROVS
+  
+  for (province in PROVS){
+    case_tmp_province <- case_tmp %>% 
+      subset(reporting_pt_en == province)
+    
+    linear_model <- lm(formula = ln_cumu_cases ~ time_conti, case_tmp_province)
+    
+    lambda[[province]] <- linear_model$coefficients[2] %>%
+      unname()
+  }
+  
+  r0_tmp <- (1 + lambda * D) * (1 + lambda * D_apostr)
+  r0_sens[[which(cur_cutoff == sens_cutoffs)]] <- data.frame(
+    time_cutoff = rep(cur_cutoff, 3), prov = names(r0_tmp), r0 = r0_tmp
+  )
+}
+
+r0_sens
+
+## output results ----
+# put outputs together
+r0_out <- bind_rows(r0_main, r0_sens)
+
+# format
+r0_out <- r0_out %>% pivot_wider(names_from = prov, values_from = r0)
+r0_out <- r0_out %>% arrange(time_cutoff)
+
+write.csv(r0_out, "./out/r0-estim-cases.csv", row.names = FALSE)
+
