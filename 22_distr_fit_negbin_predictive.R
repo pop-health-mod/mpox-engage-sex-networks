@@ -16,62 +16,30 @@ if(!exists("fit_bayes_ls")){
 pmf_iter <- create_city_list(CITIES_DATAPTS)
 pmf_wt_by_city <- create_city_list(CITIES_DATAPTS)
 
-if(DO_AGE){
 for(cur_city in CITIES_DATAPTS){
-  
-  for(a in AGES){
   # extract PMF iterations from stan
-  index_age <- which(AGES == a)
-  pmf_tmp_a <- extract(fit_bayes_ls[[cur_city]], pars = "pmf")$pmf[, index_age, ]
-  pmf_iter[[cur_city]][[a]] <- pmf_tmp_a
+  pmf_tmp <- extract(fit_bayes_ls[[cur_city]], pars = "pmf")$pmf
+  pmf_iter[[cur_city]] <- pmf_tmp
   
   # get credible intervals
-  cred_l_a <- vector("double", ncol(pmf_tmp_a))
-  cred_u_a <- vector("double", ncol(pmf_tmp_a))
+  cred_l <- vector("double", ncol(pmf_tmp))
+  cred_u <- vector("double", ncol(pmf_tmp))
   
-  for(i in 1:ncol(pmf_tmp_a)){
-    cred_l_a[i] <- quantile(pmf_tmp_a[ ,i], .025)
-    cred_u_a[i] <- quantile(pmf_tmp_a[ ,i], .975)
+  for(i in 1:ncol(pmf_tmp)){
+    cred_l[i] <- quantile(pmf_tmp[, i], .025)
+    cred_u[i] <- quantile(pmf_tmp[, i], .975)
   }
   
   # create tibble with each city and time period
-  pmf_wt_by_city[[cur_city]][[a]] <- tibble(data_pt = cur_city,
-                                       age_grp = a,
+  pmf_wt_by_city[[cur_city]] <- tibble(data_pt = cur_city,
                                        y_pred = 0:300,
-                                       mean = colSums(pmf_tmp_a) / nrow(pmf_tmp_a),
-                                       cr.i_low = cred_l_a,
-                                       cr.i_upp = cred_u_a)
+                                       mean = colSums(pmf_tmp) / nrow(pmf_tmp),
+                                       cr.i_low = cred_l,
+                                       cr.i_upp = cred_u)
   
-  rm(cred_l_a, cred_u_a)}
-  
-  pmf_wt_by_city[[cur_city]] <- bind_rows(pmf_wt_by_city[[cur_city]])}
-  
-  rm(pmf_tmp_a)}else{
-  for(cur_city in CITIES_DATAPTS){
-    # extract PMF iterations from stan
-    pmf_tmp <- extract(fit_bayes_ls[[cur_city]], pars = "pmf")$pmf
-    pmf_iter[[cur_city]] <- pmf_tmp
-    
-    # get credible intervals
-    cred_l <- vector("double", ncol(pmf_tmp))
-    cred_u <- vector("double", ncol(pmf_tmp))
-    
-    for(i in 1:ncol(pmf_tmp)){
-      cred_l[i] <- quantile(pmf_tmp[, i], .025)
-      cred_u[i] <- quantile(pmf_tmp[, i], .975)
-    }
-    
-    # create tibble with each city and time period
-    pmf_wt_by_city[[cur_city]] <- tibble(data_pt = cur_city,
-                                         y_pred = 0:300,
-                                         mean = colSums(pmf_tmp) / nrow(pmf_tmp),
-                                         cr.i_low = cred_l,
-                                         cr.i_upp = cred_u)
-    
-    rm(cred_l, cred_u)
-  }
-  rm(pmf_tmp)
+  rm(cred_l, cred_u)
 }
+rm(pmf_tmp)
 
 # collapse into
 pmf_wt_by_city <- bind_rows(pmf_wt_by_city)
@@ -79,9 +47,8 @@ pmf_wt_by_city$data_pt <- factor(pmf_wt_by_city$data_pt, levels = CITIES_DATAPTS
 
 ## Verify PMF posterior distributions ----
 # verify results by looking at the mean number of partners
-ifelse(DO_AGE, group_var <- c("age_grp", "data_pt"), group_var <- "data_pt")
 data_mean_nb_partn <- pmf_wt_by_city %>%
-  group_by(across(all_of(group_var))) %>%
+  group_by(data_pt) %>%
   summarize(mean_wt = sum(y_pred * mean),
             cr.i_low = sum(y_pred * cr.i_low),
             cr.i_upp = sum(y_pred * cr.i_upp),
@@ -92,18 +59,10 @@ data_mean_nb_partn
 
 # verify that weights sum up to 1
 pmf_wt_by_city %>% 
-  group_by(across(all_of(group_var))) %>% 
-  summarize(dens_ttl = sum(mean), 
-            .groups = "drop") 
-
-if(DO_AGE){# save full fitted pmf
-  write.csv(pmf_wt_by_city,
-            sprintf("%s/pmf_weighted_all_partn.csv", out_distr_path),
-            row.names = F)
-  stop("cdf was not implemented for age-specific output")}
+  group_by(data_pt) %>% 
+  summarize(dens_ttl = sum(mean), .groups = "drop")
 
 # Cumulative density function ----
-
 # compute fitted CDF in each datapoint (similar procedure as for pmf)
 # make lists to hold data for each city
 cdf_wt_by_city <- create_city_list(CITIES_DATAPTS)
@@ -157,7 +116,7 @@ cdf_wt_by_city$time_pt <- factor(cdf_wt_by_city$time_pt,
 
 # Output tables (PMF and CDF) ----
 # save iterations (only for main analyses)
-saveRDS(pmf_iter, sprintf("./out/pmf_stan_iterations_%s.rds", out_distr_pref))
+saveRDS(pmf_iter, sprintf("./out/pmf_stan_iterations%s.rds", out_distr_pref))
 
 # save full fitted pmf
 write.csv(pmf_wt_by_city,
@@ -168,3 +127,85 @@ write.csv(pmf_wt_by_city,
 write.csv(cdf_wt_by_city,
           sprintf("%s/cdf_weighted_all_partn.csv", out_distr_path),
           row.names = F)
+
+# Tail comparison ---------------------------------------------------------
+
+# cut-off above which to compute the CDF for the comparisons
+# i.e., compute % of population reporting >=x degree of partners
+degree <- 100
+
+## within each city, compare
+# pandemic vs pre-,
+# post- vs pandemic, and
+# post- vs pre-
+cdf_comparison_by_city <- create_city_list(CITIES)
+
+for(city_name in CITIES){
+  # extract PMF iterations from Stan for each time point
+  pmf_pre <-  extract(fit_bayes_ls[[paste(city_name, "Pre-Pandemic", sep = "-")]], pars = "pmf")$pmf
+  pmf_pand <- extract(fit_bayes_ls[[paste(city_name, "Pandemic", sep = "-")]], pars = "pmf")$pmf
+  pmf_post <- extract(fit_bayes_ls[[paste(city_name, "Post-Restrictions", sep = "-")]], pars = "pmf")$pmf
+  
+  # compare for >=100 partners
+  cdf_comparison_by_city[[city_name]] <-  foreach( cur_iter = 1:nrow(pmf_pre) ) %dopar% {
+    compare_timepts(
+      pmf_1 = pmf_pre,
+      pmf_2 = pmf_pand,
+      pmf_3 = pmf_post,
+      degree_cutoff = 100
+    )
+  }
+  
+  # get the % in each comparison that returned TRUE
+  cdf_comparison_by_city[[city_name]] <- bind_rows(cdf_comparison_by_city[[city_name]])
+  
+  cdf_compare_summ <- apply(cdf_comparison_by_city, MARGIN = 2, mean)
+  
+  cdf_comparison_by_city[[city_name]] <- tibble(
+    city = city_name,
+    pre_pand = cdf_compare_summ["pre_pand"],
+    pand_post = cdf_compare_summ["pand_post"],
+    pre_post = cdf_compare_summ["pre_post"]
+  )
+  
+}
+rm(pmf_pre, pmf_pand, pmf_post)
+
+## within the 1st and 3rd time periods, compare
+# Toronto vs Montreal
+# Toronto vs Vancouver
+# Vancouver vs Montreal
+cdf_comparison_by_timept <- create_city_list(TIMEPTS)
+
+for(time_pt_name in TIMEPTS){
+  # extract PMF iterations from Stan for each time point
+  pmf_mtl <- extract(fit_bayes_ls[[paste("Montreal", time_pt_name, sep = "-")]], pars = "pmf")$pmf
+  pmf_tor <- extract(fit_bayes_ls[[paste("Toronto", time_pt_name, sep = "-")]], pars = "pmf")$pmf
+  pmf_van <- extract(fit_bayes_ls[[paste("Vancouver", time_pt_name, sep = "-")]], pars = "pmf")$pmf
+  
+  # compare for >=100 partners
+  cdf_comparison_by_timept[[time_pt_name]] <-  foreach( cur_iter = 1:nrow(pmf_pre) ) %dopar% {
+    compare_cities(
+      pmf_mtl = pmf_mtl,
+      pmf_tor = pmf_tor,
+      pmf_van = pmf_van,
+      degree_cutoff = 100
+    )
+  }
+  
+  # get the % in each comparison that returned TRUE
+  cdf_comparison_by_timept[[time_pt_name]] <- bind_rows(cdf_comparison_by_timept[[time_pt_name]])
+  
+  cdf_compare_summ <- apply(cdf_comparison_by_timept, MARGIN = 2, mean)
+  
+  # save results in final list
+  cdf_comparison_by_timept[[time_pt_name]] <- tibble(
+    time_pt = city_name,
+    mtl_tor = cdf_compare_summ["mtl_tor"],
+    van_tor = cdf_compare_summ["van_tor"],
+    mtl_van = cdf_compare_summ["mtl_van"]
+  )
+  
+}
+rm(pmf_mtl, pmf_tor, pmf_van)
+
