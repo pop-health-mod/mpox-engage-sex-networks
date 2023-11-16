@@ -16,27 +16,27 @@ outcome_var <- "nb_part_ttl"
 
 ## sensitivity analysis with zero-inflated negative binomial
 DO_ZINF <- FALSE
-## to produce pmf of each age group for second model
-DO_AGE <- F
+## to produce pmf of each age-hiv group for second model
+DO_AGEHIV <- T
 
 ## define paths & prefixes based on the analysis being done
 fig_path <- case_when(DO_ZINF ~ "./fig/results-checks-zinf",
-                      DO_AGE ~ "./fig/results-checks-age",
+                      DO_AGEHIV ~ "./fig/results-checks-agehiv",
                       outcome_var == "nb_part_ttl" ~ "./fig/results-checks",
                       outcome_var == "nb_part_anal" ~ "./fig/results-checks-anal"
                       )
 
 stan_model_path <- ifelse(DO_ZINF, "./src-stan/regression_negbin_zinf_aggregate.stan", 
-                          ifelse(DO_AGE, "./src-stan/regression_negbin_aggregate_age.stan", 
+                          ifelse(DO_AGEHIV, "./src-stan/regression_negbin_aggregate_agehiv.stan", 
                                  "./src-stan/regression_negbin_aggregate.stan"))
 
 out_distr_path <- case_when(DO_ZINF ~ "./out/fitted-distr-sens-zinf",
-                            DO_AGE ~ "./out/fitted-distr-age",
+                            DO_AGEHIV ~ "./out/fitted-distr-agehiv",
                             outcome_var == "nb_part_ttl" ~ "./out/fitted-distributions",
                             outcome_var == "nb_part_anal" ~ "./out/fitted-distr-sens-anal",
                             )
 out_distr_pref <- case_when(DO_ZINF ~ "zinf",
-                            DO_AGE ~ "age",
+                            DO_AGEHIV ~ "agehiv",
                             outcome_var == "nb_part_ttl" ~ "all",
                             outcome_var == "nb_part_anal" ~ "anal",
                             )
@@ -60,17 +60,28 @@ data_3cities <- bind_rows(
 CITIES <- c("Montreal", "Toronto", "Vancouver")
 TIMEPTS <- c("Pre-Pandemic", "Pandemic", "Post-Restrictions")
 # TIMEPTS <- c("Post-Restrictions")
+if(DO_AGEHIV){
 AGES <- sort(unique(data_3cities$age_grp))
+HIV <- unique(data_3cities$hiv_stat)
+AGEHIV <- paste(rep(AGES, each = 2), HIV, sep = ".")
 table(data_3cities$time_pt, 
       data_3cities$city, 
       data_3cities$age_grp,
+      data_3cities$hiv_stat,
       useNA = "ifany")
-
 data_3cities <- data_3cities %>% 
   mutate(
     data_pt = factor(paste(city, time_pt, sep = "-"),
-                     levels = paste(rep(CITIES, each = 3), TIMEPTS, sep = "-"))
+                     levels = paste(rep(CITIES, each = 3), TIMEPTS, sep = "-")),
+    age_hiv = factor(paste(age_grp, hiv_stat, sep = "."),
+                     levels = AGEHIV)
   )
+
+}else{data_3cities <- data_3cities %>% 
+  mutate(
+    data_pt = factor(paste(city, time_pt, sep = "-"),
+                     levels = paste(rep(CITIES, each = 3), TIMEPTS, sep = "-"))
+  )}
 
 CITIES_DATAPTS <- paste(
   rep(CITIES, each = 3), 
@@ -82,17 +93,25 @@ CITIES_DATAPTS <- paste(
 # save time by aggregating individuals
 # before computing Pr(Y = y) for 0 to 300
 nrow(data_3cities) # nb of individuals, could be the same person at different timepoints
+if(DO_AGEHIV){
 data_aggrt <- data_3cities %>% 
-  group_by(age_grp) %>%
+  group_by(age_hiv) %>%
   count(data_pt, rel_status,
         bath_m, bath_d,
         groupsex_m, groupsex_d, 
         apps_partn_m, apps_partn_d, 
         sex_work_m, sex_work_d)
-
-if(DO_AGE){
-  count(data_aggrt, "age_grp")
-  } # nb of combinations of covariates for each age group (across all city-datapoint)
+count(data_aggrt, "age_hiv") # nb of combinations of covariates for each age-hiv group (across all city-datapoint)
+}else{
+  data_aggrt <- data_3cities %>% 
+    group_by(data_pt) %>%
+    count(age_grp, rel_status,
+          bath_m, bath_d,
+          groupsex_m, groupsex_d, 
+          apps_partn_m, apps_partn_d, 
+          sex_work_m, sex_work_d)
+  count(data_aggrt, "data_pt")
+  }
 
 # Fit Bayesian models ----
 
@@ -137,36 +156,36 @@ vars_model_fu <- setdiff(vars_model_base,
 fit_bayes_ls <- create_city_list(CITIES_DATAPTS)
 
 # prepare data_frame for aggregate data points
-if(DO_AGE){
-df_x_aggrt_age <- data_3cities %>% 
-  split(.$age_grp)
-data_x_aggrt_age <- list()
+if(DO_AGEHIV){
+df_x_aggrt_ah <- data_3cities %>% 
+  split(.$age_hiv)
+data_x_aggrt_ah <- list()
 
 for(cur_city in CITIES_DATAPTS){
-  data_x_aggrt_age_cur_city <- list()
-    for(a in AGES){
-    cur_city_index <- df_x_aggrt_age[[a]]$data_pt == cur_city
-    cur_city_data <- df_x_aggrt_age[[a]][cur_city_index, ]
-    data_x_aggrt_age_cur_city[[a]] <- cur_city_data %>%
+  data_x_aggrt_ah_cur_city <- list()
+    for(ah in AGEHIV){
+    cur_city_index <- df_x_aggrt_ah[[ah]]$data_pt == cur_city
+    cur_city_data <- df_x_aggrt_ah[[ah]][cur_city_index, ]
+    data_x_aggrt_ah_cur_city[[ah]] <- cur_city_data %>%
       group_by(across(all_of(vars_model_base))) %>% 
       summarize(nb = n(), 
             ipw_rds = sum(ipw_rds), 
             .groups = "drop") %>% 
       select(nb, ipw_rds, all_of(vars_model_base))}
   
-    cur_city_max_combo <- max(unname(unlist(lapply(data_x_aggrt_age_cur_city, nrow))))
+    cur_city_max_combo <- max(unname(unlist(lapply(data_x_aggrt_ah_cur_city, nrow))))
     
-    data_x_aggrt_age[[cur_city]] <- array(data = 0,
-                                          dim = c(length(AGES), cur_city_max_combo, ncol(data_x_aggrt_age_cur_city[[a]])),
-                                          dimnames = list(AGES, 1:cur_city_max_combo, colnames(data_x_aggrt_age_cur_city[[a]])))
+    data_x_aggrt_ah[[cur_city]] <- array(data = 0,
+                                          dim = c(length(AGEHIV), cur_city_max_combo, ncol(data_x_aggrt_ah_cur_city[[ah]])),
+                                          dimnames = list(AGEHIV, 1:cur_city_max_combo, colnames(data_x_aggrt_ah_cur_city[[ah]])))
 
-    for(a in AGES){
+    for(ah in AGEHIV){
 
-      n_row <- nrow(data_x_aggrt_age_cur_city[[a]])
-      n_col <- ncol(data_x_aggrt_age_cur_city[[a]])
+      n_row <- nrow(data_x_aggrt_ah_cur_city[[ah]])
+      n_col <- ncol(data_x_aggrt_ah_cur_city[[ah]])
       for(r in 1:n_row){
         for(c in 1:n_col){
-          data_x_aggrt_age[[cur_city]][a, r, c] <- unname(unlist(data_x_aggrt_age_cur_city[[a]][r,c]))
+          data_x_aggrt_ah[[cur_city]][ah, r, c] <- unname(unlist(data_x_aggrt_ah_cur_city[[ah]][r, c]))
         }
       }
     }} 
@@ -194,22 +213,21 @@ for(cur_city in CITIES_DATAPTS){
   } else {
     vars_model <- vars_model_fu
   }
-  if(DO_AGE){
+  if(DO_AGEHIV){
+  set.seed(777)
   fit_bayes_ls[[cur_city]] <- sampling(
     negbin_model,
     data = list(y = filter(data_3cities, data_pt == cur_city)[[outcome_var]],
                 # data on which model is fit
                 x = data_3cities[data_3cities$data_pt == cur_city, vars_model],
                 N = sum(data_3cities$data_pt == cur_city),
-                n_age = length(AGES),
                 # data to compute predictions
-                x_aggr_age = data_x_aggrt_age[[cur_city]][, , vars_model],
-                N_aggr_age = dim(data_x_aggrt_age[[cur_city]])[2],
+                n_ah = length(AGEHIV),
+                x_aggr_ah = data_x_aggrt_ah[[cur_city]][, , vars_model],
+                N_aggr_ah = dim(data_x_aggrt_ah[[cur_city]])[2],
                 K = length(vars_model),
-                # want equal number of combos in each age groups for each data_pt 
-                # data for PMF and CDF
                 x_end = 300,
-                ipc_rds_w_age = data_x_aggrt_age[[cur_city]][, , "ipw_rds"]),
+                ipc_rds_w_ah = data_x_aggrt_ah[[cur_city]][, , "ipw_rds"]),
     cores = num_cores,
     chains = 2, iter = 4000
   )}else{
@@ -353,6 +371,6 @@ coeff_post_tbl <- coeff_post_tbl %>%
 coeff_post_tbl <- coeff_post_tbl %>% select(coeff, ends_with("mtl"), ends_with("trt"), ends_with("van"))
 
 # only save coefficients of main analyses
-if(outcome_var == "nb_part_ttl" & !DO_ZINF & !DO_AGE){
+if(outcome_var == "nb_part_ttl" & !DO_ZINF & !DO_AGEHIV){
   write.csv(coeff_post_tbl, "./out/manuscript-tables/table_S3_coef_post.csv")
 }

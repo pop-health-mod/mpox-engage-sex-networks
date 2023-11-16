@@ -16,37 +16,39 @@ if(!exists("fit_bayes_ls")){
 pmf_iter <- create_city_list(CITIES_DATAPTS)
 pmf_wt_by_city <- create_city_list(CITIES_DATAPTS)
 
-if(DO_AGE){
+if(DO_AGEHIV){
 for(cur_city in CITIES_DATAPTS){
   
-  for(a in AGES){
+  for(ah in AGEHIV){
   # extract PMF iterations from stan
-  index_age <- which(AGES == a)
-  pmf_tmp_a <- extract(fit_bayes_ls[[cur_city]], pars = "pmf")$pmf[, index_age, ]
-  pmf_iter[[cur_city]][[a]] <- pmf_tmp_a
+  index_ah <- which(AGEHIV == ah)
+  pmf_tmp_ah <- extract(fit_bayes_ls[[cur_city]], pars = "pmf")$pmf[, index_ah, ]
+  pmf_iter[[cur_city]][[ah]] <- pmf_tmp_ah
   
   # get credible intervals
-  cred_l_a <- vector("double", ncol(pmf_tmp_a))
-  cred_u_a <- vector("double", ncol(pmf_tmp_a))
+  cred_l_ah <- vector("double", ncol(pmf_tmp_ah))
+  cred_u_ah <- vector("double", ncol(pmf_tmp_ah))
   
-  for(i in 1:ncol(pmf_tmp_a)){
-    cred_l_a[i] <- quantile(pmf_tmp_a[ ,i], .025)
-    cred_u_a[i] <- quantile(pmf_tmp_a[ ,i], .975)
+  for(i in 1:ncol(pmf_tmp_ah)){
+    cred_l_ah[i] <- quantile(pmf_tmp_ah[ ,i], .025)
+    cred_u_ah[i] <- quantile(pmf_tmp_ah[ ,i], .975)
   }
   
   # create tibble with each city and time period
-  pmf_wt_by_city[[cur_city]][[a]] <- tibble(data_pt = cur_city,
-                                       age_grp = a,
+  pmf_wt_by_city[[cur_city]][[ah]] <- tibble(data_pt = cur_city,
+                                       age_hiv = ah,
                                        y_pred = 0:300,
-                                       mean = colSums(pmf_tmp_a) / nrow(pmf_tmp_a),
-                                       cr.i_low = cred_l_a,
-                                       cr.i_upp = cred_u_a)
+                                       mean = colSums(pmf_tmp_ah) / nrow(pmf_tmp_ah),
+                                       cr.i_low = cred_l_ah,
+                                       cr.i_upp = cred_u_ah) %>%
+    pivot_longer(cols = "age_hiv") %>%
+    separate(value, into = c('age_grp', 'hiv_stats'), sep = "\\.")
   
-  rm(cred_l_a, cred_u_a)}
+  rm(cred_l_ah, cred_u_ah)}
   
   pmf_wt_by_city[[cur_city]] <- bind_rows(pmf_wt_by_city[[cur_city]])}
   
-  rm(pmf_tmp_a)}else{
+  rm(pmf_tmp_ah)}else{
   for(cur_city in CITIES_DATAPTS){
     # extract PMF iterations from stan
     pmf_tmp <- extract(fit_bayes_ls[[cur_city]], pars = "pmf")$pmf
@@ -79,7 +81,9 @@ pmf_wt_by_city$data_pt <- factor(pmf_wt_by_city$data_pt, levels = CITIES_DATAPTS
 
 ## Verify PMF posterior distributions ----
 # verify results by looking at the mean number of partners
-ifelse(DO_AGE, group_var <- c("age_grp", "data_pt"), group_var <- "data_pt")
+ifelse(DO_AGEHIV, 
+       group_var <- c("age_grp", "hiv_stats", "data_pt"), 
+       group_var <- "data_pt")
 data_mean_nb_partn <- pmf_wt_by_city %>%
   group_by(across(all_of(group_var))) %>%
   summarize(mean_wt = sum(y_pred * mean),
@@ -96,11 +100,11 @@ pmf_wt_by_city %>%
   summarize(dens_ttl = sum(mean), 
             .groups = "drop") 
 
-if(DO_AGE){# save full fitted pmf
+if(DO_AGEHIV){# save full fitted pmf
   write.csv(pmf_wt_by_city,
             sprintf("%s/pmf_weighted_all_partn.csv", out_distr_path),
             row.names = F)
-  stop("cdf was not implemented for age-specific output")}
+  stop("cdf was not implemented for age-hiv-specific output")}
 
 # Cumulative density function ----
 
