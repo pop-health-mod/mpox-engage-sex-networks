@@ -135,5 +135,5 @@ r0_out <- bind_rows(r0_main, r0_sens)
 r0_out <- r0_out %>% pivot_wider(names_from = prov, values_from = r0)
 r0_out <- r0_out %>% arrange(time_cutoff)
 
-write.csv(r0_out, "./out/r0-estim-cases.csv", row.names = FALSE)
+write.csv(r0_out, "./out/manuscript-tables/table_S5_r0_estim_cases.csv", row.names = FALSE)
 
