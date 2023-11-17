@@ -18,6 +18,7 @@ data_ipcw <- read_csv("./out/fitted-distributions/cdf_weighted_all_partn.csv")
 data_restr <- read_csv("./out/fitted-distr-sens-restrict/cdf_weighted_all_partn.csv")
 data_stand <- read_csv("./out/fitted-distr-sens-standard/cdf_weighted_all_partn.csv")
 data_anal <- read_csv("./out/fitted-distr-sens-anal/cdf_weighted_all_partn.csv")
+data_zinf <- read_csv("./out/fitted-distr-sens-zinf/cdf_weighted_all_partn.csv")
 
 data_anal$time_pt <- gsub("Restriction", "Restrictions", data_anal$time_pt)
 
@@ -26,7 +27,8 @@ data_fit_cdf <- bind_rows(
   mutate(data_ipcw, dataset = "Main"),
   mutate(data_restr, dataset = "Restriction"),
   mutate(data_stand, dataset = "Standardization"),
-  mutate(data_anal, dataset = "Anal")
+  mutate(data_anal, dataset = "Anal"),
+  mutate(data_zinf, dataset = "ZINF")
 )
 
 # create city and time point variables
@@ -165,5 +167,38 @@ if(plot_sens_loglog){
 p_anal
 
 ggsave("./fig/fig_S5_cdf_main_all_vs_anal.png",
+       device = "png",
+       width = 15, height = 13, units = "cm", dpi = 600)
+
+# Plot: ZINF ----
+p_zinf <- plot_cdf_fit(
+  filter(data_fit_cdf, dataset %in% c("Main", "ZINF")),
+  col_var = "dataset", outcome_type = "all"
+) +
+  facet_grid(time_pt ~ city) +
+  scale_x_continuous(trans = scales::pseudo_log_trans(),
+                     breaks = c(0, 10, 100, 300)) +
+  
+  scale_fill_manual(values = col_pal) +
+  scale_colour_manual(values = col_pal) +
+  
+  labs(col = "Analysis", fill = "Analysis") +
+  
+  theme(
+    legend.position = "bottom",
+    axis.title = element_text(size = 12),    # axis titles size
+    axis.text = element_text(size = 10),     # axis text size
+  )
+
+if(plot_sens_loglog){
+  p_zinf <- p_zinf +
+    coord_cartesian(ylim = y_minmax) +
+    scale_y_continuous(breaks = log(y_log_breaks),
+                       labels = y_log_breaks)
+}
+
+p_zinf
+
+ggsave("./fig/fig_S6_cdf_main_vs_zinf.png",
        device = "png",
        width = 15, height = 13, units = "cm", dpi = 600)

@@ -17,19 +17,19 @@ outcome_var <- "nb_part_ttl"
 DO_ZINF <- FALSE
 
 ## define paths & prefixes based on the analysis being done
-fig_path <- case_when(outcome_var == "nb_part_ttl" ~ "./fig/results-checks",
-                      outcome_var == "nb_part_anal" ~ "./fig/results-checks-anal",
-                      DO_ZINF ~ "./fig/results-checks-zinf")
+fig_path <- case_when(DO_ZINF ~ "./fig/results-checks-zinf",
+                      outcome_var == "nb_part_ttl" ~ "./fig/results-checks",
+                      outcome_var == "nb_part_anal" ~ "./fig/results-checks-anal")
 
 stan_model_path <- ifelse(DO_ZINF, "./src-stan/regression_negbin_zinf_aggregate.stan",
                           "./src-stan/regression_negbin_aggregate.stan")
 
-out_distr_path <- case_when(outcome_var == "nb_part_ttl" ~ "./out/fitted-distributions",
-                            outcome_var == "nb_part_anal" ~ "./out/fitted-distr-sens-anal",
-                            DO_ZINF ~ "./out/fitted-distr-sens-zinf")
-out_distr_pref <- case_when(outcome_var == "nb_part_ttl" ~ "",
-                            outcome_var == "nb_part_anal" ~ "-anal",
-                            DO_ZINF ~ "-zinf")
+out_distr_path <- case_when(DO_ZINF ~ "./out/fitted-distr-sens-zinf",
+                            outcome_var == "nb_part_ttl" ~ "./out/fitted-distributions",
+                            outcome_var == "nb_part_anal" ~ "./out/fitted-distr-sens-anal")
+out_distr_pref <- case_when(DO_ZINF ~ "-zinf",
+                            outcome_var == "nb_part_ttl" ~ "",
+                            outcome_var == "nb_part_anal" ~ "-anal")
 
 ## load data
 data_3cities_pre_ipcw <- read_csv("../mpx-engage-params/data-3cities-feb-2023/pre_ipcw_3cities.csv")
@@ -190,7 +190,12 @@ for(cur_city in CITIES_DATAPTS){
   #           filename = paste0("traceplot-", cur_city),
   #           wd = sprintf("%s/model-checks-p6m-all", fig_path),
   #           open_pdf = F)
-  cur_p_trace_plot <- traceplot(fit_bayes_ls[[cur_city]], pars = c("alpha", "beta", "phi"))
+  if(DO_ZINF){
+    shape_vars <- c("shape", "zi")
+  } else {
+    shape_vars <- "phi"
+  }
+  cur_p_trace_plot <- traceplot(fit_bayes_ls[[cur_city]], pars = c("alpha", "beta", shape_vars))
   ggsave(sprintf("%s/model-checks-p6m-all-%s-%s.png", fig_path, which(cur_city == CITIES_DATAPTS), cur_city),
          cur_p_trace_plot, device = "png",
          height = 14, width = 30, units = "cm", dpi = 320)
