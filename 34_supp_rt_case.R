@@ -8,7 +8,7 @@ theme_set(theme_bw())
 
 ## data for Rt estimation (only need the 3 concerned provinces)
 PROVS <- c("Québec", "Ontario", "British Columbia")
-data_mpox <- read_csv("../mpx-engage-params/misc-grant-app/data-case/monkeypox-detailed-2023june13.csv")
+data_mpox <- read_csv("./data-public/monkeypox-detailed-2023june13.csv")
 data_mpox$reporting_pt_en[data_mpox$reporting_pt_en == "Quebec"] <- "Québec"
 
 data_mpox <- subset(data_mpox, reporting_pt_en %in% PROVS)
@@ -95,7 +95,7 @@ data_rt <- full_join(df_time, data_rt, by = c("prov_en", "t_end"))
 data_rt$prov_en <- factor(data_rt$prov_en, levels = PROVS)
 
 # see when Rt stablizes
-png("./fig/fig_S6_rt.png",
+png("./fig/fig_S7_rt.png",
     width = 16, height = 12, units = "cm", res = 600)
 
 ggplot(data_rt, aes(x = t_end)) +
@@ -104,7 +104,7 @@ ggplot(data_rt, aes(x = t_end)) +
   geom_line(aes(y = rt_mean, col = prov_en)) +
   facet_wrap(~prov_en, ncol = 1) +
   coord_cartesian(ylim = c(0, 3)) +
-  labs(x = "Days since first case", y = expression(italic('R'[t])), col = "Province", fill = "Province") +
+  labs(x = "Days since first case", y = expression(italic('R'["e"])), col = "Province", fill = "Province") +
   theme(legend.position = "top") +
   scale_colour_viridis_d(option = "C", end = 0.8) +
   scale_fill_viridis_d(option = "C", end = 0.8) +

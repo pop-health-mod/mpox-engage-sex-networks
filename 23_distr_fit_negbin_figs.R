@@ -100,6 +100,18 @@ grid.arrange(
 )
 dev.off()
 
+pdf("./fig/fig_1_cdf_main_model.pdf",
+    width = 15 / 2.54, height = 16 / 2.54)
+grid.arrange(
+  p_by_time + theme_cdf,
+  p_by_time_sel + theme_cdf,
+  p_by_city + theme_cdf,
+  yaxis,
+  layout_matrix = matrix(c(4, 4, 4, 1, 2, 3), nrow = 3, byrow = F),
+  widths = unit(c(0.4, 14.6), "cm")
+)
+dev.off()
+
 # Check goodness of fit (CDF from NB vs weighted observed) ----
 ## compute frequency each one was reported
 data_cdf_obs <- data_3cities %>% 

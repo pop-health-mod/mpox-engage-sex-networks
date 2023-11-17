@@ -104,6 +104,10 @@ png("./fig/fig_2_seir_model_fit.png",
     width = 8, height = 12, units = "cm", res = 600)
 p_mod_fit
 dev.off()
+pdf("./fig/fig_2_seir_model_fit.pdf",
+    width = 8 / 2.54, height = 12 / 2.54)
+p_mod_fit
+dev.off()
 
 ### Panel A: NGM R_e depleting groups ----
 data_r0 <- read_csv("./out-seir/fit_r0.csv")
@@ -215,3 +219,9 @@ png("./fig/fig_3_seir_ngm_r0.png",
     width = 18, height = 12, units = "cm", res = 600)
 grid.arrange(p_r0_a, p_r0_b, ncol = 1)
 dev.off()
+pdf("./fig/fig_3_seir_ngm_r0.pdf",
+    width = 18 / 2.54, height = 12 / 2.54)
+grid.arrange(p_r0_a, p_r0_b, ncol = 1)
+dev.off()
+
+

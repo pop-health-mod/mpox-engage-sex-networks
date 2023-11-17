@@ -179,5 +179,3 @@ df_results_ls$pre_project$prop <- round(df_results_ls$pre_project$prop, 5)
 write_csv(df_results_ls$post_main, "./out/fitted-distributions-grouped/pmf_weighted_partn_p6m_20grps.csv")
 write_csv(df_results_ls$pre_project, "./out/fitted-distributions-grouped/pmf_weighted_partn_p6m_20grps_prepandemic.csv")
 
-
-

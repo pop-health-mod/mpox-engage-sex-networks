@@ -3,7 +3,6 @@
 library(tidyverse)
 library(lubridate)
 library(survey)
-library(svyweight)
 theme_set(theme_bw())
 
 source("./src/utils_helper.R")
@@ -83,7 +82,7 @@ tbl_retain <- tbl_retain %>%
   pivot_wider(names_from = "city", values_from = c("nb", "prop")) %>% 
   select(time_pt, ends_with("_mtl"), ends_with("_trt"), ends_with("_van"))
 
-write.csv(tbl_retain, "./out/manuscript-tables/table_S2_retention.csv", row.names = FALSE)
+write.csv(tbl_retain, "./out/manuscript-tables/table_S3_retention.csv", row.names = FALSE)
 
 ## Compute IPCWs ----
 # lists to store each city's dataset with IPCWs
@@ -155,15 +154,33 @@ write.csv(ipcw_pre,"../mpx-engage-params/data-3cities-feb-2023/pre_ipcw_3cities.
 write.csv(ipcw_pand,"../mpx-engage-params/data-3cities-feb-2023/pand_ipcw_3cities.csv", row.names = F)
 write.csv(ipcw_post,"../mpx-engage-params/data-3cities-feb-2023/post_ipcw_3cities.csv", row.names = F)
 
-# effective sample size at baseline
-for (cur_city in CITIES){
-  city_data <- filter(ipcw_pre, city == cur_city)
-  city_design <- svydesign(id = ~1, 
-          data = city_data, 
-          weights= ~ipw_rds)
-  print(nrow(city_data))
-  print(eff_n(city_design))
+## effective sample size at baseline ----
+df_ess <- vector("list", 3)
+names(df_ess) <- CITIES
+
+for (cty in CITIES){
+  print(sprintf("%s ===================", cty))
+  data_tmp <- ipcw_pre %>% filter(city == cty & time_pt == "Pre-Pandemic")
+  
+  print( nrow(data_tmp) )
+  print( sum(data_tmp$wt_rds) )
+  print( sum(data_tmp$wt_rds_norm) )
+  
+  # get deff
+  df_svy <- svydesign(ids = ~0, data = data_tmp, weights = ~wt_rds)
+  avg <- svymean(~ nb_part_ttl, design = df_svy, deff = TRUE)
+  
+  df_ess[[cty]] <- data.frame(city = cty,
+                              n = nrow(data_tmp),
+                              deff = data.frame(avg)$deff,
+                              ess = nrow(data_tmp) / data.frame(avg)$deff)
+  
+  # print(df_ess[[cty]]$ess)
+  print( round(df_ess[[cty]]$ess, 2) )
 }
+df_ess <- bind_rows(df_ess)
+
+write.csv(df_ess, "./out/manuscript-tables/table_1_ess.csv")
 
 # Restriction analysis (sensitivity analysis) ----
 ## Get number of participants with complete data ----

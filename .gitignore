@@ -49,7 +49,7 @@ po/*~
 rsconnect/
 
 # figures to verify results, not to upload
-/fig/results-checks
+/fig/results-checks*
 /out/fitted-*
 /out/*.rds
 

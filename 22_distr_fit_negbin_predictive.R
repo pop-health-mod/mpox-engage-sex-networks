@@ -135,7 +135,7 @@ write.csv(cdf_wt_by_city,
 
 # cut-off above which to compute the CDF for the comparisons
 # i.e., compute % of population reporting >=x degree of partners
-degree <- 100
+# degree <- 25
 
 ## within each city, compare ----
 # pandemic vs pre-,
@@ -152,36 +152,41 @@ cl <- parallel::makeCluster(numCores, type = "PSOCK")
 # register
 doParallel::registerDoParallel(cl = cl)
 
+t0 <- Sys.time()
 for(city_name in CITIES){
-  # extract PMF iterations from Stan for each time point
-  pmf_pre <-  extract(fit_bayes_ls[[paste(city_name, "Pre-Pandemic", sep = "-")]], pars = "pmf")$pmf
-  pmf_pand <- extract(fit_bayes_ls[[paste(city_name, "Pandemic", sep = "-")]], pars = "pmf")$pmf
-  pmf_post <- extract(fit_bayes_ls[[paste(city_name, "Post-Restrictions", sep = "-")]], pars = "pmf")$pmf
+  print(city_name)
+  
+  # retrieve PMF iterations from Stan for each time point
+  pmf_pre <-  pmf_iter[[paste(city_name, "Pre-Pandemic", sep = "-")]]
+  pmf_pand <- pmf_iter[[paste(city_name, "Pandemic", sep = "-")]]
+  pmf_post <- pmf_iter[[paste(city_name, "Post-Restrictions", sep = "-")]]
   
   # compare for >=100 partners
-  cdf_comparison_by_city[[city_name]] <-  foreach( cur_iter = 1:nrow(pmf_pre) ) %dopar% {
+  cdf_comparison_by_city_tmp <-  foreach( cur_iter = 1:nrow(pmf_pre) ) %dopar% {
     compare_timepts(
       pmf_1 = pmf_pre,
       pmf_2 = pmf_pand,
       pmf_3 = pmf_post,
-      degree_cutoff = 100
+      degree_cutoff = 25
     )
   }
   
   # get the % in each comparison that returned TRUE
-  cdf_comparison_by_city[[city_name]] <- bind_rows(cdf_comparison_by_city[[city_name]])
+  cdf_comparison_by_city_tmp <- bind_rows(cdf_comparison_by_city_tmp)
   
-  cdf_compare_summ <- apply(cdf_comparison_by_city, MARGIN = 2, mean)
+  cdf_compare_summ <- apply(cdf_comparison_by_city_tmp, MARGIN = 2, mean)
   
   cdf_comparison_by_city[[city_name]] <- tibble(
     city = city_name,
-    pre_pand = cdf_compare_summ["pre_pand"],
-    pand_post = cdf_compare_summ["pand_post"],
-    pre_post = cdf_compare_summ["pre_post"]
+    pre_largeq_pand = cdf_compare_summ["pre_pand"],
+    post_largeq_pand = cdf_compare_summ["pand_post"],
+    pre_largeq_post = cdf_compare_summ["pre_post"]
   )
   
 }
 rm(pmf_pre, pmf_pand, pmf_post)
+t1 <- Sys.time()
+t1 - t0 # 3.7 mins
 
 ## within the 1st and 3rd time periods, compare ----
 # Toronto vs Montreal
@@ -189,14 +194,15 @@ rm(pmf_pre, pmf_pand, pmf_post)
 # Vancouver vs Montreal
 cdf_comparison_by_timept <- create_city_list(TIMEPTS)
 
+t0 <- Sys.time()
 for(time_pt_name in TIMEPTS){
   # extract PMF iterations from Stan for each time point
-  pmf_mtl <- extract(fit_bayes_ls[[paste("Montreal", time_pt_name, sep = "-")]], pars = "pmf")$pmf
-  pmf_tor <- extract(fit_bayes_ls[[paste("Toronto", time_pt_name, sep = "-")]], pars = "pmf")$pmf
-  pmf_van <- extract(fit_bayes_ls[[paste("Vancouver", time_pt_name, sep = "-")]], pars = "pmf")$pmf
+  pmf_mtl <- pmf_iter[[paste("Montreal", time_pt_name, sep = "-")]]
+  pmf_tor <- pmf_iter[[paste("Toronto", time_pt_name, sep = "-")]]
+  pmf_van <- pmf_iter[[paste("Vancouver", time_pt_name, sep = "-")]]
   
   # compare for >=100 partners
-  cdf_comparison_by_timept[[time_pt_name]] <-  foreach( cur_iter = 1:nrow(pmf_pre) ) %dopar% {
+  cdf_comparison_by_timept[[time_pt_name]] <-  foreach( cur_iter = 1:nrow(pmf_mtl) ) %dopar% {
     compare_cities(
       pmf_mtl = pmf_mtl,
       pmf_tor = pmf_tor,
@@ -208,19 +214,28 @@ for(time_pt_name in TIMEPTS){
   # get the % in each comparison that returned TRUE
   cdf_comparison_by_timept[[time_pt_name]] <- bind_rows(cdf_comparison_by_timept[[time_pt_name]])
   
-  cdf_compare_summ <- apply(cdf_comparison_by_timept, MARGIN = 2, mean)
+  cdf_compare_summ <- apply(cdf_comparison_by_timept[[time_pt_name]], MARGIN = 2, mean)
   
   # save results in final list
   cdf_comparison_by_timept[[time_pt_name]] <- tibble(
     time_pt = city_name,
-    mtl_tor = cdf_compare_summ["mtl_tor"],
-    van_tor = cdf_compare_summ["van_tor"],
-    mtl_van = cdf_compare_summ["mtl_van"]
+    tor_largeq_mtl = cdf_compare_summ["mtl_tor"],
+    tor_largeq_van = cdf_compare_summ["van_tor"],
+    van_largeq_mtl = cdf_compare_summ["mtl_van"]
   )
   
 }
 rm(pmf_mtl, pmf_tor, pmf_van)
+t1 <- Sys.time()
+t1 - t0
 
 stopCluster(cl)
 
 ## Output results ----
+dat_cdf_by_city <- bind_rows(cdf_comparison_by_city)
+dat_cdf_by_timept <- bind_rows(cdf_comparison_by_timept)
+
+if(outcome_var == "nb_part_ttl" & !DO_ZINF){
+  write.csv(dat_cdf_by_city, "./out/text_tail_compare_largeq25_by_city.csv")
+  write.csv(dat_cdf_by_timept, "./out/text_tail_compare_largeq100_by_timept.csv")
+}

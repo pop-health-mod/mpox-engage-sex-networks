@@ -6,7 +6,7 @@ compare_pmf_tail <- function(pmf_a, pmf_b, degree_cutoff){
   cdf_over_b <- sum(pmf_b[degree_cutoff:length(pmf_b)])
   
   # then return whether cdf_1 is bigger than cdf_0
-  return( as.numeric(cdf_over_b > cdf_over_a) )
+  return( as.numeric(cdf_over_b >= cdf_over_a) )
 }
 
 # compare across the 3 different time points,
@@ -15,16 +15,17 @@ compare_pmf_tail <- function(pmf_a, pmf_b, degree_cutoff){
 #       3: post-restrictions time period
 compare_timepts <- function(pmf_1, pmf_2, pmf_3,
                             degree_cutoff){
-  # first nb is the reference time period and second nb is the comparison
-  comparison_1_2 <- compare_pmf_tail(pmf_1, pmf_2, degree_cutoff)
+  # in variable name comparison_a_b, we're comparing is b >= a
+  # so a is the 'reference' and b is the comparison
+  comparison_2_1 <- compare_pmf_tail(pmf_2, pmf_1, degree_cutoff)
   comparison_2_3 <- compare_pmf_tail(pmf_2, pmf_3, degree_cutoff)
-  comparison_1_3 <- compare_pmf_tail(pmf_1, pmf_3, degree_cutoff)
+  comparison_3_1 <- compare_pmf_tail(pmf_3, pmf_1, degree_cutoff)
   
   # organize comparisons
   df <- data.frame(
-    pre_pand = comparison_1_2,   # did activity decrease during the pandemic?
-    pand_post = comparison_2_3,  # did activity increase after restrictions lifting?
-    pre_post = comparison_1_3    # did activity go back to pre-pandemic (after lifting)?
+    pre_pand = comparison_2_1,   # did activity decrease during the pandemic?             [is pre >= pand]
+    pand_post = comparison_2_3,  # did activity increase after restrictions lifting?      [is post >= pand]
+    pre_post = comparison_3_1    # did activity go back to pre-pandemic (after lifting)?  [is pre >= post]
   )
   
   return(df)
@@ -33,16 +34,17 @@ compare_timepts <- function(pmf_1, pmf_2, pmf_3,
 # compare across the 3 cities,
 compare_cities <- function(pmf_mtl, pmf_tor, pmf_van,
                            degree_cutoff){
-  # first nb is the reference city and second nb is the comparison
+  # in variable name comparison_a_b, we're comparing is b >= a
+  # so a is the 'reference' and b is the comparison
   comparison_mtl_tor <- compare_pmf_tail(pmf_mtl, pmf_tor, degree_cutoff)
   comparison_van_tor <- compare_pmf_tail(pmf_van, pmf_tor, degree_cutoff)
   comparison_mtl_van <- compare_pmf_tail(pmf_mtl, pmf_van, degree_cutoff)
   
   # organize comparisons
   df <- data.frame(
-    mtl_tor = comparison_mtl_tor,   # was the tail 'fatter' in Toronto vs Montreal?
-    van_tor = comparison_van_tor,   #          "            in Toronto vs Vancouver?
-    mtl_van = comparison_mtl_van    #          "            in Vancouver vs Montreal?
+    mtl_tor = comparison_mtl_tor,   # was the tail 'fatter' in Toronto vs Montreal?     [is tor >= mtl]
+    van_tor = comparison_van_tor,   #          "            in Toronto vs Vancouver?    [is tor >= van]
+    mtl_van = comparison_mtl_van    #          "            in Vancouver vs Montreal?   [is van >= mtl]
   )
   
   return(df)

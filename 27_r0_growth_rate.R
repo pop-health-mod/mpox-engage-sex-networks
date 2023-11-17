@@ -5,13 +5,17 @@ library(ggtext)
 theme_set(theme_bw())
 
 ## mpox parameters
-D = 3.83        # infectious duration
-D_apostr = 5.1  # latency duration
+# get infectious duration from fit model
+df_pars <- read.csv("./out-seir/fit_pars.csv")
+# infectious duration
+D = subset(df_pars, city == "all" & parameter == "duration infectiousness (1/gamma)")$value
+# latency duration
+D_apostr = 5.1
 
 ## case data for R0 based on growth rate
 #     from PHAC, https://health-infobase.canada.ca/mpox/
 #     (use monkeypox-detailed.csv file)
-case_data <- read.csv("../mpx-engage-params/misc-grant-app/data-case/monkeypox-detailed-2023june13.csv")
+case_data <- read.csv("./data-public/monkeypox-detailed-2023june13.csv")
 case_data$reporting_pt_en[case_data$reporting_pt_en == "Quebec"] <- "Québec"
 
 # only need the 3 concerned provinces

@@ -179,6 +179,9 @@ for(cur_city in CITIES_DATAPTS){
 t1 <- Sys.time()
 t1 - t0 # ~9 minutes (regression and PMF)
 
+# save model fits
+# saveRDS(fit_bayes_ls, sprintf("./out/text_stan_model_fit%s.rds", out_distr_pref))
+
 ## Inspect model convergence diagnostic ----
 # convergence of model chains (traceplots)
 for(cur_city in CITIES_DATAPTS){
@@ -223,11 +226,11 @@ for(i in 1:length(ess_ls)){
 ess_tbl <- bind_rows(ess_ls_tbl)
 rm(ess_ls_tbl)
 
-write_csv(ess_tbl, "./out/stan_model_fit_ess.csv")
-
 # save summary by city & time period
 summarize_ess(ess_tbl, beta_only = F)
 summarize_ess(ess_tbl, beta_only = T)
+
+write_csv(ess_tbl, "./out/stan_model_fit_ess.csv")
 
 ## Regression coefficients (RR) ----
 ## extract coefficients (only for post-restrictions period)
@@ -296,5 +299,5 @@ coeff_post_tbl <- coeff_post_tbl %>% select(coeff, ends_with("mtl"), ends_with("
 
 # only save coefficients of main analyses
 if(outcome_var == "nb_part_ttl" & !DO_ZINF){
-  write.csv(coeff_post_tbl, "./out/manuscript-tables/table_S3_coef_post.csv")
+  write.csv(coeff_post_tbl, "./out/manuscript-tables/table_S4_coef_post.csv")
 }

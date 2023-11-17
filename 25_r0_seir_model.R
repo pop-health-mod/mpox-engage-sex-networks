@@ -53,7 +53,7 @@ for(province in PROV){
   
   # population size and contact rates for model
   sex <- subset(sex_, city == cty)
-  N <- ifelse(cty == "van", 26100, ifelse(cty == "tor", 85000, 56000))
+  N <- ifelse(cty == "van", 26100, ifelse(cty == "tor", 78000, 54000))
   k <- nrow(sex)
   k_size <- sex$prop; if (sum(k_size) != 1) { print("error, pop size") }
   contact <- sex$mean_rate / 180
@@ -130,8 +130,8 @@ plot(fit_ls[[cty]]$cases ~ fit_ls[[cty]]$date, type = 'l', lwd = 3, col = "fireb
      xlab = "time", ylab = "reported mpox cases (day)")
   lines(incid_ls[[cty]]$incidence ~ incid_ls[[cty]]$date, type = "s", col = "steelblue4", lwd = 2)
 
-# saveRDS(fit_ls, "./2023-11-15_model_fit_out.rds")
-# saveRDS(par_ls, "./2023-11-15_model_fit_pars.rds")
+# saveRDS(fit_ls, "./out-seir/2023-11-17_model_fit_out.rds")
+# saveRDS(par_ls, "./out-seir/2023-11-17_model_fit_pars.rds")
 
 ## Credible interval simulations ----
 # simulate CrI
@@ -140,16 +140,19 @@ ci_ls <- list(mtl = NULL,
               tor = NULL,
               van = NULL)
 
+t0 <- Sys.time()
 for(cty in CITIES){
   print(cty)
-  ci_ls[[cty]] <- simul_fun(opt_ls[[cty]]$hessian, theta_ls[[cty]], fixed_par_ls[[cty]], sim = 500,
-                            SIR = TRUE, likdat = likdat_ls[[cty]], nsir = 2500, with_replacement = TRUE)
+  ci_ls[[cty]] <- simul_fun(opt_ls[[cty]]$hessian, theta_ls[[cty]], fixed_par_ls[[cty]], sim = 1000,
+                            SIR = TRUE, likdat = likdat_ls[[cty]], nsir = 5000, with_replacement = TRUE)
   print(ci_ls[[cty]]$posterior_ci)
   
   ci_ls[[cty]]$result$date <- ci_ls[[cty]]$result$time - fixed_par_ls[[cty]]$lag_introduction + min(incid_ls[[cty]]$date)
 }
+t1 <- Sys.time()
+t1 - t0 #35 mins
 
-# saveRDS(ci_ls, "./2023-11-15_CIs.rds")
+# saveRDS(ci_ls, "./out-seir/2023-11-17_CIs.rds")
 
 ### Verification of results ----
 ## plotting results with CIs
