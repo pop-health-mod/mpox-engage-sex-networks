@@ -197,6 +197,8 @@ for(cur_city in CITIES_DATAPTS){
 }
 rm(cur_p_trace_plot)
 
+##### can stop here for sensitivity analyses
+
 # r hat and effective sample size
 ess_ls <- create_city_list(CITIES_DATAPTS)
 for(cur_city in CITIES_DATAPTS){
@@ -230,7 +232,9 @@ rm(ess_ls_tbl)
 summarize_ess(ess_tbl, beta_only = F)
 summarize_ess(ess_tbl, beta_only = T)
 
-write_csv(ess_tbl, "./out/stan_model_fit_ess.csv")
+if(outcome_var == "nb_part_ttl" & !DO_ZINF){
+  write_csv(ess_tbl, "./out/stan_model_fit_ess.csv")
+}
 
 ## Regression coefficients (RR) ----
 ## extract coefficients (only for post-restrictions period)

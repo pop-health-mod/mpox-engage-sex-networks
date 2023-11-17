@@ -8,11 +8,12 @@ library(foreach)
 
 source("./src/utils_helper.R")
 source("./src/utils_regression.R")
-set.seed(111)
 theme_set(theme_bw())
 
 ## which variable to use as outcome
 outcome_var <- "nb_part_ttl" 
+out_distr_path <- "./out/fitted-distr-sens-standard"
+out_distr_pref <- "-standard"
 fig_path <- "./fig/results-checks-standard"
 
 data_3cities_pre_ipcw <- read_csv("../mpx-engage-params/data-3cities-feb-2023/pre_ipcw_3cities.csv")
@@ -86,6 +87,15 @@ table(data_3cities$data_pt, data_3cities$sex_work_d, useNA = "ifany")
 # hiv status 
 table(data_3cities$data_pt, data_3cities$hiv_stat, useNA = "ifany")
 
+# hiv status x age
+data_3cities <- data_3cities %>% 
+  mutate(
+    hiv_age_30_39 = as.integer(age_30_39 == 1 & hiv_stat == 1),
+    hiv_age_40_49 = as.integer(age_40_49 == 1 & hiv_stat == 1),
+    hiv_age_50_59 = as.integer(age_50_59 == 1 & hiv_stat == 1),
+    hiv_age_60_ = as.integer(age_60_ == 1 & hiv_stat == 1),
+  )
+
 ### fit model
 negbin_model <- stan_model(file = "./src-stan/regression_negbin_aggregate.stan",
                            model_name = "negbin_partn")
@@ -94,6 +104,7 @@ negbin_model <- stan_model(file = "./src-stan/regression_negbin_aggregate.stan",
 vars_model_base <- c("age_30_39", "age_40_49", "age_50_59", "age_60_",
                      "rel_y_excl", "rel_y_open", "rel_y_uncl", 
                      "hiv_stat",
+                     "hiv_age_30_39", "hiv_age_40_49", "hiv_age_50_59", "hiv_age_60_",
                      "bath_m", "bath_d",
                      "groupsex_m", "groupsex_d", 
                      "apps_partn_m", "apps_partn_d",
@@ -136,13 +147,19 @@ for(cur_city in CITIES_DATAPTS){
   fit_bayes_ls[[cur_city]] <- sampling(
     negbin_model,
     data = list(y = filter(data_3cities, data_pt == cur_city)[[outcome_var]],
+                
                 # data on which model is fit
                 x = data_3cities[data_3cities$data_pt == cur_city, vars_model],
                 N = sum(data_3cities$data_pt == cur_city),
+                
                 # data to compute predictions
                 x_aggr = data_x_aggrt[data_x_aggrt$data_pt == target_pop_stand, vars_model],
                 N_aggr = sum(data_x_aggrt$data_pt == target_pop_stand),
-                K = length(vars_model)),
+                K = length(vars_model),
+                
+                # data for PMF and CDF
+                x_end = 300,
+                ipc_rds_w = data_x_aggrt$ipw_rds[data_x_aggrt$data_pt == target_pop_stand]),
     cores = num_cores,
     chains = 2, iter = 4000
   )
@@ -179,108 +196,45 @@ for(cur_city in CITIES_DATAPTS){
 }
 rm(cur_model, row_param_names)
 
-# Compute density for each participant (grouped) ----
-# get distribution of expected predictions
-# rows: iterations, columns: each individual's prediction (mean of the NB)
-data_ypred <- create_city_list(CITIES_DATAPTS)
-phi_all <- create_city_list(CITIES_DATAPTS)
-
-for(cur_city in CITIES_DATAPTS){
-  data_ypred[[cur_city]] <- extract(fit_bayes_ls[[cur_city]], pars = "y_pred")$y_pred
-  phi_all[[cur_city]] <- extract(fit_bayes_ls[[cur_city]], pars = "phi")$phi
-}
-
-density_list_by_iter <- create_city_list(CITIES_DATAPTS)
-
-# start a cluster
-numCores <- parallel::detectCores()
-numCores
-numCores <- numCores - 1
-cl <- parallel::makeCluster(numCores, type = "PSOCK")
-
-# register
-doParallel::registerDoParallel(cl = cl)
-
-t0 <- Sys.time()
-for(cur_city in CITIES_DATAPTS){
-  
-  print(cur_city)
-  
-  density_list_by_iter[[cur_city]] <- foreach(i = 1:nrow(data_ypred[[cur_city]])) %dopar% {
-    compute_dens_negbin.single(
-      data_ypred[[cur_city]][i, ],
-      range_x = 0:300,
-      phi = phi_all[[cur_city]][i]
-    )
-  }
-}
-t1 <- Sys.time()
-t1 - t0 # 2.19 mins
-
-# close cluster
-stopCluster(cl)
-
 # Probability mass function ----
-## Get posterior predictive distribution (PMF) ----
-
-# make lists to hold data for each city
-tmp_density <- create_city_list(CITIES_DATAPTS) # 4000 iterations per city-data_pt 
-dens_wt_by_city <- create_city_list(CITIES_DATAPTS)
-
-## compute the PMF
-t0 <- Sys.time()
-for(cur_city in CITIES_DATAPTS){
-  cat(sprintf("%s\n", cur_city))
-  
-  # target to standardize to
-  target_pop_stand <- gsub("Vancouver|Montreal|Toronto", target_city, cur_city)
-  
-  # compute density in the city and visit
-  tmp_density[[cur_city]] <- compute_pmf(
-    density_list_by_iter[[cur_city]],
-    filter(data_x_aggrt, data_pt == target_pop_stand)$ipw_rds,
-    nb_aggregate = filter(data_x_aggrt, data_pt == target_pop_stand)$nb
-  )
-  
-  dens_wt_by_city[[cur_city]] <- summarize_density(tmp_density[[cur_city]], "dens_wt")
-}
-t1 <- Sys.time()
-t1 - t0  # 6.9 mins
-
-# verify that all densities sum up to 1
-for(cur_city in CITIES_DATAPTS){
-  range_dens <- tmp_density[[cur_city]] %>% 
-    group_by(iter) %>% 
-    summarize(dens_ttl = sum(dens_wt)) %>%
-    pull(dens_ttl)
-  
-  # output density sums (range and median)
-  tabs_insert <- ifelse(grepl("Restrictions", cur_city), "\t", "\t\t")
-  
-  cat(
-    sprintf(
-      "%s%s%s\t\t%s\n", cur_city, tabs_insert,
-      paste(round(range(range_dens), 5), collapse = "-"),
-      round(mean(range_dens), 5)
-    )
-  )
-}
+## density and PMF computations already performed in Stan
 
 ## Collapse PMF into single dataset ----
-# collapse each city
+pmf_iter <- create_city_list(CITIES_DATAPTS)
+pmf_wt_by_city <- create_city_list(CITIES_DATAPTS)
+
 for(cur_city in CITIES_DATAPTS){
-  dens_wt_by_city[[cur_city]]$data_pt <- cur_city
+  # extract PMF iterations from stan
+  pmf_tmp <- extract(fit_bayes_ls[[cur_city]], pars = "pmf")$pmf
+  pmf_iter[[cur_city]] <- pmf_tmp
+  
+  # get credible intervals
+  cred_l <- vector("double", ncol(pmf_tmp))
+  cred_u <- vector("double", ncol(pmf_tmp))
+  
+  for(i in 1:ncol(pmf_tmp)){
+    cred_l[i] <- quantile(pmf_tmp[, i], .025)
+    cred_u[i] <- quantile(pmf_tmp[, i], .975)
+  }
+  
+  # create tibble with each city and time period
+  pmf_wt_by_city[[cur_city]] <- tibble(data_pt = cur_city,
+                                       y_pred = 0:300,
+                                       mean = colSums(pmf_tmp) / nrow(pmf_tmp),
+                                       cr.i_low = cred_l,
+                                       cr.i_upp = cred_u)
+  
+  rm(cred_l, cred_u)
 }
-dens_wt_by_city <- bind_rows(dens_wt_by_city)
+rm(pmf_tmp)
 
-# reorder to put city-time period first
-dens_wt_by_city <- dens_wt_by_city[, .(data_pt, y_pred, mean, mdn, cr.i_low, cr.i_upp)]
+# collapse into
+pmf_wt_by_city <- bind_rows(pmf_wt_by_city)
+pmf_wt_by_city$data_pt <- factor(pmf_wt_by_city$data_pt, levels = CITIES_DATAPTS)
 
-dens_wt_by_city$data_pt <- factor(dens_wt_by_city$data_pt, levels = CITIES_DATAPTS)
-
-# Verify PMF posterior distributions ----
-# look at the mean number of partners
-data_mean_nb_partn <- dens_wt_by_city %>%
+## Verify PMF posterior distributions ----
+# verify results by looking at the mean number of partners
+data_mean_nb_partn <- pmf_wt_by_city %>%
   group_by(data_pt) %>%
   summarize(mean_wt = sum(y_pred * mean),
             cr.i_low = sum(y_pred * cr.i_low),
@@ -291,7 +245,7 @@ data_mean_nb_partn <- dens_wt_by_city %>%
 data_mean_nb_partn
 
 # verify that weights sum up to 1
-dens_wt_by_city %>% 
+pmf_wt_by_city %>% 
   group_by(data_pt) %>% 
   summarize(dens_ttl = sum(mean), .groups = "drop")
 
@@ -299,38 +253,44 @@ dens_wt_by_city %>%
 # compute fitted CDF in each datapoint (similar procedure as for pmf)
 # make lists to hold data for each city
 cdf_wt_by_city <- create_city_list(CITIES_DATAPTS)
-
-t0 <- Sys.time()
 for(cur_city in CITIES_DATAPTS){
-  cat(sprintf("%s\n", cur_city))
+  # extract PMF iterations from data
+  pmf_tmp <- pmf_iter[[cur_city]]
   
-  # target to standardize to
-  target_pop_stand <- gsub("Vancouver|Montreal|Toronto", target_city, cur_city)
+  # empty CDF matrix
+  cdf_tmp <- matrix(0, nrow = nrow(pmf_tmp), ncol = ncol(pmf_tmp))
   
-  # compute CDF in the city/timepoint
-  tmp_density <- compute_cdf(
-    density_list_by_iter[[cur_city]],
-    filter(data_x_aggrt, data_pt == target_pop_stand)$ipw_rds,
-    nb_aggregate = filter(data_x_aggrt, data_pt == target_pop_stand)$nb
-  )
+  # sum PMF starting from long tail towards 0
+  for(i in ncol(pmf_tmp):1){
+    if(i == ncol(pmf_tmp)){
+      cdf_tmp[, i] <- pmf_tmp[, i]
+    } else {
+      cdf_tmp[, i] <- pmf_tmp[, i] + cdf_tmp[, i+1]
+    }
+  }
   
-  # compute weighted densities
-  cdf_wt_by_city[[cur_city]] <- summarize_density(tmp_density, "cdf_wt")
+  # get credible intervals
+  cred_l <- vector("double", ncol(cdf_tmp))
+  cred_u <- vector("double", ncol(cdf_tmp))
+  
+  for(i in 1:ncol(cdf_tmp)){
+    cred_l[i] <- quantile(cdf_tmp[, i], .025)
+    cred_u[i] <- quantile(cdf_tmp[, i], .975)
+  }
+  
+  # create tibble with each city and time period
+  cdf_wt_by_city[[cur_city]] <- tibble(data_pt = cur_city,
+                                       y_pred = 0:300,
+                                       mean = colSums(cdf_tmp) / nrow(cdf_tmp),
+                                       cr.i_low = cred_l,
+                                       cr.i_upp = cred_u)
+  
+  rm(cred_l, cred_u)
 }
-t1 <- Sys.time()
-t1 - t0 #  7.78 mins
-
-# collapse into single dataset
-for(cur_city in CITIES_DATAPTS){
-  cdf_wt_by_city[[cur_city]]$data_pt <- cur_city
-}
+rm(pmf_tmp, cdf_tmp)
 
 # collapse into a single dataframe
 cdf_wt_by_city <- bind_rows(cdf_wt_by_city)
-
-# reorder to put city and relationship first
-cdf_wt_by_city <- cdf_wt_by_city[, .(data_pt, y_pred, mean, mdn, cr.i_low, cr.i_upp)]
-
 
 cdf_wt_by_city <- cdf_wt_by_city %>% 
   mutate(city = gsub("-Pre-Pandemic|-Pandemic|-Post-Restrictions", "", data_pt),
@@ -342,10 +302,15 @@ cdf_wt_by_city$time_pt <- factor(cdf_wt_by_city$time_pt,
                                  levels = c("Pre-Pandemic", "Pandemic", "Post-Restrictions"))
 
 # Output tables (PMF and CDF) ----
-# full fitted distribution pmf
-write.csv(dens_wt_by_city, "./out/fitted-distr-sens-standard/pmf_weighted_all_partn.csv",
+# save iterations (only for main analyses)
+saveRDS(pmf_iter, sprintf("./out/pmf_stan_iterations%s.rds", out_distr_pref))
+
+# save full fitted pmf
+write.csv(pmf_wt_by_city,
+          sprintf("%s/pmf_weighted_all_partn.csv", out_distr_path),
           row.names = F)
 
-# save full fitted distribution
-write.csv(cdf_wt_by_city, "./out/fitted-distr-sens-standard/cdf_weighted_all_partn.csv",
+# save full fitted cdf
+write.csv(cdf_wt_by_city,
+          sprintf("%s/cdf_weighted_all_partn.csv", out_distr_path),
           row.names = F)
