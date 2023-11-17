@@ -168,7 +168,8 @@ getci <- function(df) {
 # simulation to obtain CrI
 simul_fun <- function(hessian, theta, fixed_par, sim = 1000, 
                       SIR = TRUE, nsir = 1000, likdat = NULL,
-                      with_replacement = TRUE, track_sims = FALSE) {
+                      with_replacement = TRUE, track_sims = FALSE,
+                      parallel = TRUE) {
   # From the hessian, simulate the model
   vcova <- Matrix::solve(-hessian)
   
@@ -199,15 +200,28 @@ simul_fun <- function(hessian, theta, fixed_par, sim = 1000,
     par_sir <- rbind(par_sir, theta)
     prp_dens <- mvtnorm::dmvt(par_sir, theta, as.matrix(vcova), df = 2, log = TRUE)
     
-    # You might get some warnings, that's OK, the function will return NA
-    # and we replace them with -Inf in the llk. We suppress them.
-    loglikelihood_sir <- suppressWarnings(
-      apply(
-        par_sir, MARGIN = 1, FUN = function(x) {
-          llk(x, fixed_par, likdat, calibration = TRUE)
-        }
+    if (parallel == FALSE)  {
+      # You might get some warnings, that's OK, the function will return NA
+      # and we replace them with -Inf in the llk. We suppress them.
+      loglikelihood_sir <- suppressWarnings(
+        apply(
+          par_sir, MARGIN = 1, FUN = function(x) {
+            llk(x, fixed_par, likdat, calibration = TRUE)
+          }
+        )
       )
-    )
+    } else {
+      require(doParallel)
+      cl <- parallel::makeCluster(parallel::detectCores() - 1)
+      doParallel::registerDoParallel(cl)
+      parallel::clusterExport(cl, c("fixed_par", "likdat", "llk", "prior_dens", "mpox_mod"))
+      # You might get some warnings, that's OK, the function will return NA
+      # and we replace them with -Inf in the llk. We suppress them.
+      loglikelihood_sir <- foreach::foreach(i = 1:nrow(par_sir), .combine = "c") %dopar% {
+        par_sir_i <- par_sir[i, ]
+        llk(par_sir_i, fixed_par, likdat, calibration = TRUE)  }
+      parallel::stopCluster(cl)
+    }
     
     loglikelihood_sir[!is.finite(loglikelihood_sir)] <- -Inf
     dens_ratio <- loglikelihood_sir - prp_dens

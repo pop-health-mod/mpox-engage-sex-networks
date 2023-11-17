@@ -144,13 +144,14 @@ t0 <- Sys.time()
 for(cty in CITIES){
   print(cty)
   ci_ls[[cty]] <- simul_fun(opt_ls[[cty]]$hessian, theta_ls[[cty]], fixed_par_ls[[cty]], sim = 1000,
-                            SIR = TRUE, likdat = likdat_ls[[cty]], nsir = 10000, with_replacement = TRUE)
+                            SIR = TRUE, likdat = likdat_ls[[cty]], nsir = 10000, with_replacement = TRUE,
+                            parallel = TRUE)
   print(ci_ls[[cty]]$posterior_ci)
   
   ci_ls[[cty]]$result$date <- ci_ls[[cty]]$result$time - fixed_par_ls[[cty]]$lag_introduction + min(incid_ls[[cty]]$date)
 }
 t1 <- Sys.time()
-t1 - t0 #35 mins
+t1 - t0 #47 mins
 
 # saveRDS(ci_ls, "./out-seir/2023-11-17_CIs.rds")
 

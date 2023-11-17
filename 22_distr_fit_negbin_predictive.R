@@ -60,6 +60,8 @@ data_mean_nb_partn <- pmf_wt_by_city %>%
 
 data_mean_nb_partn
 
+write_csv(data_mean_nb_partn, "./out/text_mean_partn.csv")
+
 # verify that weights sum up to 1
 pmf_wt_by_city %>% 
   group_by(data_pt) %>% 
@@ -202,7 +204,7 @@ for(time_pt_name in TIMEPTS){
   pmf_van <- pmf_iter[[paste("Vancouver", time_pt_name, sep = "-")]]
   
   # compare for >=100 partners
-  cdf_comparison_by_timept[[time_pt_name]] <-  foreach( cur_iter = 1:nrow(pmf_mtl) ) %dopar% {
+  cdf_comparison_by_timept_tmp <-  foreach( cur_iter = 1:nrow(pmf_mtl) ) %dopar% {
     compare_cities(
       pmf_mtl = pmf_mtl,
       pmf_tor = pmf_tor,
@@ -212,13 +214,13 @@ for(time_pt_name in TIMEPTS){
   }
   
   # get the % in each comparison that returned TRUE
-  cdf_comparison_by_timept[[time_pt_name]] <- bind_rows(cdf_comparison_by_timept[[time_pt_name]])
+  cdf_comparison_by_timept_tmp <- bind_rows(cdf_comparison_by_timept_tmp)
   
-  cdf_compare_summ <- apply(cdf_comparison_by_timept[[time_pt_name]], MARGIN = 2, mean)
+  cdf_compare_summ <- apply(cdf_comparison_by_timept_tmp, MARGIN = 2, mean)
   
   # save results in final list
   cdf_comparison_by_timept[[time_pt_name]] <- tibble(
-    time_pt = city_name,
+    time_pt = time_pt_name,
     tor_largeq_mtl = cdf_compare_summ["mtl_tor"],
     tor_largeq_van = cdf_compare_summ["van_tor"],
     van_largeq_mtl = cdf_compare_summ["mtl_van"]
