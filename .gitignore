@@ -54,4 +54,6 @@ rsconnect/
 /out/*.rds
 
 # temporary outputs
+/out-seir/
+/out/text_*
 /out-tmp/

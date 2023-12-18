@@ -1,7 +1,7 @@
 # Library and data -------------
 library(tidyverse)
 source("./src/utils_helper.R")
-data_3cities <- read_csv("../mpx-engage-params/data-3cities-feb-2023/engage_baseline_3cities.csv")
+data_3cities <- read_csv("../mpx-engage-params/data-processed/engage_baseline_3cities.csv")
 
 # Data cleaning and formating ------------------
 ## create dummy variables

@@ -32,9 +32,9 @@ out_distr_pref <- case_when(DO_ZINF ~ "-zinf",
                             outcome_var == "nb_part_anal" ~ "-anal")
 
 ## load data
-data_3cities_pre_ipcw <- read_csv("../mpx-engage-params/data-3cities-feb-2023/pre_ipcw_3cities.csv")
-data_3cities_pand_ipcw <- read_csv("../mpx-engage-params/data-3cities-feb-2023/pand_ipcw_3cities.csv")
-data_3cities_post_ipcw <- read_csv("../mpx-engage-params/data-3cities-feb-2023/post_ipcw_3cities.csv")
+data_3cities_pre_ipcw <- read_csv("../mpx-engage-params/data-processed/pre_ipcw_3cities.csv")
+data_3cities_pand_ipcw <- read_csv("../mpx-engage-params/data-processed/pand_ipcw_3cities.csv")
+data_3cities_post_ipcw <- read_csv("../mpx-engage-params/data-processed/post_ipcw_3cities.csv")
 
 # create single dataset with all time periods & cities
 data_3cities <- bind_rows(
@@ -172,15 +172,15 @@ for(cur_city in CITIES_DATAPTS){
                 x_end = 300,
                 ipc_rds_w = data_x_aggrt$ipw_rds[data_x_aggrt$data_pt == cur_city]),
     cores = num_cores,
-    chains = 2, iter = 4000
+    chains = 2, iter = 6000
   )
 }
 
 t1 <- Sys.time()
-t1 - t0 # ~9 minutes (regression and PMF)
+t1 - t0 # ~11 minutes (regression and PMF)
 
 # save model fits
-# saveRDS(fit_bayes_ls, sprintf("./out/text_stan_model_fit%s.rds", out_distr_pref))
+# saveRDS(fit_bayes_ls, sprintf("./out/stan_model_fit%s.rds", out_distr_pref))
 
 ## Inspect model convergence diagnostic ----
 # convergence of model chains (traceplots)

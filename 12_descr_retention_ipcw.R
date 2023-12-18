@@ -8,7 +8,6 @@ theme_set(theme_bw())
 source("./src/utils_helper.R")
 source("./src/utils_ipcw_engage.R")
 
-select <- dplyr::select
 ### key dates
 ## WHO declared a pandemic on March 11
 # DATE_PAND_START <- as.Date("2020-03-11") %m+% months(3)
@@ -22,7 +21,7 @@ DATE_PAND_ENGAGE <- as.Date("2020-06-01")
 DATE_RES_END <- as.Date("2021-09-07") %m+% months(3)
 
 # load data
-data_fu <- read_csv("../mpx-engage-params/data-3cities-feb-2023/engage_visits_3cities.csv")
+data_fu <- read_csv("../mpx-engage-params/data-processed/engage_visits_3cities.csv")
 
 # check visits between March-June 2020
 # sort(unique(data_fu$date_intv[data_fu$date_intv >= "2020-03-01" & data_fu$date_intv <= "2020-06-30"]))
@@ -89,10 +88,10 @@ write.csv(tbl_retain, "./out/manuscript-tables/table_S3_retention.csv", row.name
 ipcw_pand <- create_city_list()
 ipcw_post <- create_city_list()
 
+### Variable selection and formatting ----
 covariates <- c("apps_partn_m",
-                "apps_partn_d",
                 "rel_status",
-                "age", 
+                "age_grp", 
                 "hiv_stat",
                 "education_level_cat",
                 "income_level_cat",
@@ -102,35 +101,86 @@ covariates <- c("apps_partn_m",
                 "nb_part_ttl") # variables associated with ltfu
 
 ## check for LTFU and create indicator variable
+# first transform baseline variables into binary indicators
+data_ipcw_all <- data_fu_pre
+
+# apps_partn, hiv_stat, sex_work are all already binary
+# education_level as well but need to turn from text
+data_ipcw_all[, covariates]
+for(cur_var in covariates){ print(table(data_ipcw_all[, cur_var], useNA = "ifany")) }
+
+data_ipcw_all$edu <- as.integer(data_ipcw_all$education_level_cat == "bachelor or higher")
+
+## rearrange all other variables
+# relationship status (reference is single)
+data_ipcw_all$rel_stat_exclusive <- as.integer(data_ipcw_all$rel_status == "exclusive")
+data_ipcw_all$rel_stat_open <- as.integer(data_ipcw_all$rel_status == "open")
+data_ipcw_all$rel_stat_unclear <- as.integer(data_ipcw_all$rel_status == "unclear")
+
+data_ipcw_all %>% group_by(across(starts_with("rel_stat"))) %>% count()
+
+# age group (reference is 18-29)
+data_ipcw_all$age_30_39 <- as.integer(data_ipcw_all$age_grp == "30-39")
+data_ipcw_all$age_40_49 <- as.integer(data_ipcw_all$age_grp == "40-49")
+data_ipcw_all$age_50_59 <- as.integer(data_ipcw_all$age_grp == "50-59")
+data_ipcw_all$age_60plus <- as.integer(data_ipcw_all$age_grp == "60+")
+
+data_ipcw_all %>% select(-age) %>% group_by(across(starts_with("age"))) %>% count()
+
+# income (reference is <20k)
+data_ipcw_all$income_20_40k <- as.integer(data_ipcw_all$income_level_cat == "20,000-40,000")
+data_ipcw_all$income_40kplus <- as.integer(data_ipcw_all$income_level_cat == "40,000+")
+
+data_ipcw_all %>% select(-income_level) %>% group_by(across(starts_with("income"))) %>% count()
+
+# ethnicity (reference is White Canadian or European)
+data_ipcw_all$ethnic_vismin <- as.integer(data_ipcw_all$ethnicity_cat %in% c("White Canadian", "European"))
+
+table(data_ipcw_all$ethnicity_cat, data_ipcw_all$ethnic_vismin)
+
+# nb_partners (do <=5 vs >5)
+data_ipcw_all$nb_part_over5 <- as.integer(data_ipcw_all$nb_part_ttl > 5)
+
+table(data_ipcw_all$nb_part_over5)
+table(`>5` = data_ipcw_all$nb_part_over5, true_nb = data_ipcw_all$nb_part_ttl)
+
+
+## vector of formatted variables
+covariates_formatted <- c("apps_partn_m",
+                          "rel_stat_exclusive", "rel_stat_open", "rel_stat_unclear",
+                          "age_30_39", "age_40_49", "age_50_59", "age_60plus", 
+                          "hiv_stat",
+                          "edu",
+                          "income_20_40k",
+                          "income_40kplus",
+                          "ethnic_vismin",
+                          "sex_work_m",
+                          "sex_work_d",
+                          "nb_part_over5")
+
+### Data subsetting ----
 # check if participant has a pandemic period visit
-data_ipcw_pand <- data_fu_pre %>% 
+data_ipcw_pand <- data_ipcw_all %>% 
   mutate(
     ltfu = (part_id %in% unique(data_fu_pand$part_id))
   )
 
 # check if participant has a post-restrictions period visit
-data_ipcw_post <- data_fu_pre %>% 
+data_ipcw_post <- data_ipcw_all %>% 
   mutate(
     ltfu = (part_id %in% unique(data_fu_post$part_id))
   )
 
-# for both datasets, transform variables
-data_ipcw_pand <- data_ipcw_pand %>% 
-  mutate(across(all_of(covariates), as.factor)) %>%
-  mutate(across(all_of(covariates), as.integer))
-data_ipcw_post <- data_ipcw_post %>% 
-  mutate(across(all_of(covariates), as.factor)) %>%
-  mutate(across(all_of(covariates), as.integer))
-
+### Generate IPCWs ----
 ## generate IPCW weights for all cities
 for (cur_city in CITIES){
-  ipcw_pand <- compute_ipcw(cur_city, covariates,
+  ipcw_pand <- compute_ipcw(cur_city, covariates_formatted,
                             data_timept = data_ipcw_pand,
                             data_list = ipcw_pand)
 }
 
 for (cur_city in CITIES){
-  ipcw_post <- compute_ipcw(cur_city, covariates,
+  ipcw_post <- compute_ipcw(cur_city, covariates_formatted,
                             data_timept = data_ipcw_post,
                             data_list = ipcw_pand)
 }
@@ -150,9 +200,9 @@ ipcw_post <- merge.data.frame(data_visit_key_date, ipcw_post, by = "part_id") %>
   subset(time_pt == "Post-Restrictions")
 
 # save datasets
-write.csv(ipcw_pre,"../mpx-engage-params/data-3cities-feb-2023/pre_ipcw_3cities.csv", row.names = F)
-write.csv(ipcw_pand,"../mpx-engage-params/data-3cities-feb-2023/pand_ipcw_3cities.csv", row.names = F)
-write.csv(ipcw_post,"../mpx-engage-params/data-3cities-feb-2023/post_ipcw_3cities.csv", row.names = F)
+write.csv(ipcw_pre,"../mpx-engage-params/data-processed/pre_ipcw_3cities.csv", row.names = F)
+write.csv(ipcw_pand,"../mpx-engage-params/data-processed/pand_ipcw_3cities.csv", row.names = F)
+write.csv(ipcw_post,"../mpx-engage-params/data-processed/post_ipcw_3cities.csv", row.names = F)
 
 ## effective sample size at baseline ----
 df_ess <- vector("list", 3)
@@ -292,9 +342,9 @@ ipcw_post %>%
   group_by(city) %>% 
   summarize(nb = n(), nb_dates_same = sum(date_ipcw == date_restr), nb_dates_diff = sum(date_ipcw != date_restr))
 
-write.csv(data_res_pre,  "../mpx-engage-params/data-3cities-feb-2023/restriction/res_pre.csv", row.names = F)
-write.csv(data_res_pand,  "../mpx-engage-params/data-3cities-feb-2023/restriction/res_pand.csv", row.names = F)
-write.csv(data_res_post,  "../mpx-engage-params/data-3cities-feb-2023/restriction/res_post.csv", row.names = F)
+write.csv(data_res_pre,  "../mpx-engage-params/data-processed/restriction/res_pre.csv", row.names = F)
+write.csv(data_res_pand,  "../mpx-engage-params/data-processed/restriction/res_pand.csv", row.names = F)
+write.csv(data_res_post,  "../mpx-engage-params/data-processed/restriction/res_post.csv", row.names = F)
 
 # verify that visits don't overlap
 range(data_res_pre$date_intv)
@@ -306,4 +356,4 @@ data_res_fu <- rbind(data_res_pre,data_res_pand, data_res_post)
 table(visit = data_res_fu$time_pt, data_res_fu$city)
 
 # save dataset
-write_csv(data_res_fu,  "../mpx-engage-params/data-3cities-feb-2023/restriction/res_fu.csv")
+write_csv(data_res_fu,  "../mpx-engage-params/data-processed/restriction/res_fu.csv")
