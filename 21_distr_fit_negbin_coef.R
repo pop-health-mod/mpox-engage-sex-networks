@@ -14,6 +14,7 @@ outcome_var <- "nb_part_ttl"
 # outcome_var <- "nb_part_anal"
 
 ## sensitivity analysis with zero-inflated negative binomial
+# ZINF takes 20 mins
 DO_ZINF <- FALSE
 
 ## define paths & prefixes based on the analysis being done

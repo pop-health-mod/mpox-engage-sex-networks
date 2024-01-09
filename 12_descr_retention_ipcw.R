@@ -171,6 +171,40 @@ data_ipcw_post <- data_ipcw_all %>%
     ltfu = (part_id %in% unique(data_fu_post$part_id))
   )
 
+### Examination of imbalances in data ----
+# correlation between LTFU and outcome 0.02-0.07 for pandemic and 0.05-0.07 for post-pandemic
+for(time_pt in 2:3){
+  if(time_pt == 2){
+    print("Pandemic period correlations ===============================")
+    for(cur_city in CITIES){
+      cor_outcome_ltfu(data_ipcw_pand[data_ipcw_pand$city == cur_city, ])
+    }
+  } else {
+    print("Post restrictions period correlations ======================")
+    for(cur_city in CITIES){
+      cor_outcome_ltfu(data_ipcw_post[data_ipcw_post$city == cur_city, ])
+    }
+  }
+}
+
+## imbalances for pandemic period
+for (cur_city in CITIES){
+  data_tmp <- data_ipcw_pand[data_ipcw_pand$city == cur_city, ]
+  print( sprintf("%s ==================================", cur_city) )
+  print(
+    calc.smd(data_tmp[, covariates_formatted], data_tmp$ltfu, data_tmp$wt_rds_norm)
+  )
+}
+
+## imbalances for post restrictions period
+for (cur_city in CITIES){
+  data_tmp <- data_ipcw_pand[data_ipcw_pand$city == cur_city, ]
+  print( sprintf("%s ==================================", cur_city) )
+  print(
+    calc.smd(data_tmp[, covariates_formatted], data_tmp$ltfu, data_tmp$wt_rds_norm)
+  )
+}
+
 ### Generate IPCWs ----
 ## generate IPCW weights for all cities
 for (cur_city in CITIES){
@@ -189,6 +223,29 @@ for (cur_city in CITIES){
 ipcw_pand <- do.call(bind_rows, ipcw_pand)
 ipcw_post <- do.call(bind_rows, ipcw_post)
 
+### Verify imbalance ----
+## examine mean nb partners pre- and post-weighting
+# pandemic
+round(tapply(data_ipcw_pand$nb_part_ttl * data_ipcw_pand$wt_rds_norm, data_ipcw_pand$city, mean), 2)
+data_ipcw_pand %>% 
+  left_join(ipcw_pand, by = c("part_id")) %>% 
+  filter(ltfu == 0) %>% 
+  group_by(city) %>% 
+  summarize(mean_nb = sum(nb_part_ttl * wt_rds_norm) / sum(wt_rds_norm),
+            mean_nb_ipcw = sum(nb_part_ttl * ipw_rds) / sum(ipw_rds),
+            .groups = "drop")
+
+# post restrictions
+round(tapply(data_ipcw_post$nb_part_ttl * data_ipcw_post$wt_rds_norm, data_ipcw_post$city, mean), 2)
+data_ipcw_post %>% 
+  left_join(ipcw_post, by = c("part_id")) %>% 
+  filter(ltfu == 0) %>% 
+  group_by(city) %>% 
+  summarize(mean_nb = sum(nb_part_ttl * wt_rds_norm) / sum(wt_rds_norm),
+            mean_nb_ipcw = sum(nb_part_ttl * ipw_rds) / sum(ipw_rds),
+            .groups = "drop")
+
+### Bind and save ----
 ipcw_pre <- data_visit_key_date %>%
   subset(time_pt == "Pre-Pandemic") %>%
   mutate(ipw_rds = wt_rds_norm)

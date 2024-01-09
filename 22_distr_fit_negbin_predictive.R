@@ -60,7 +60,9 @@ data_mean_nb_partn <- pmf_wt_by_city %>%
 
 data_mean_nb_partn
 
-write_csv(data_mean_nb_partn, "./out/text_mean_partn.csv")
+if(outcome_var == "nb_part_ttl" & !DO_ZINF){
+  write_csv(data_mean_nb_partn, "./out/text_mean_partn.csv")
+}
 
 # verify that weights sum up to 1
 pmf_wt_by_city %>% 

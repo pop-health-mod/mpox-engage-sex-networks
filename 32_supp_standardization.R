@@ -16,9 +16,9 @@ out_distr_path <- "./out/fitted-distr-sens-standard"
 out_distr_pref <- "-standard"
 fig_path <- "./fig/results-checks-standard"
 
-data_3cities_pre_ipcw <- read_csv("../mpx-engage-params/data-3cities-feb-2023/pre_ipcw_3cities.csv")
-data_3cities_pand_ipcw <- read_csv("../mpx-engage-params/data-3cities-feb-2023/pand_ipcw_3cities.csv")
-data_3cities_post_ipcw <- read_csv("../mpx-engage-params/data-3cities-feb-2023/post_ipcw_3cities.csv")
+data_3cities_pre_ipcw <- read_csv("../mpx-engage-params/data-processed/pre_ipcw_3cities.csv")
+data_3cities_pand_ipcw <- read_csv("../mpx-engage-params/data-processed/pand_ipcw_3cities.csv")
+data_3cities_post_ipcw <- read_csv("../mpx-engage-params/data-processed/post_ipcw_3cities.csv")
 
 # create single dataset with all time periods & cities
 data_3cities <- bind_rows(
@@ -161,11 +161,11 @@ for(cur_city in CITIES_DATAPTS){
                 x_end = 300,
                 ipc_rds_w = data_x_aggrt$ipw_rds[data_x_aggrt$data_pt == target_pop_stand]),
     cores = num_cores,
-    chains = 2, iter = 4000
+    chains = 2, iter = 6000
   )
 }
 t1 <- Sys.time()
-t1 - t0 #  3.84 mins
+t1 - t0 # ?? mins
 
 # Inspect model results ----
 # model convergence diagnostic
@@ -182,6 +182,7 @@ for(cur_city in CITIES_DATAPTS){
 rm(cur_p_trace_plot)
 
 # r hat
+ess_ls <- create_city_list(CITIES_DATAPTS)
 for(cur_city in CITIES_DATAPTS){
   print(cur_city)
   # get model
@@ -193,8 +194,25 @@ for(cur_city in CITIES_DATAPTS){
   
   # output
   print(round(cur_model[row_param_names, ], 3))
+  
+  # save
+  ess_ls[[cur_city]] <- cur_model[row_param_names, c("mean", "se_mean", "2.5%", "50%", "97.5%", "n_eff")]
 }
 rm(cur_model, row_param_names)
+
+## effective sample size
+# Check that all coefficients have >1,000 sample size
+ess_ls_tbl <- vector("list", length(ess_ls))
+for(i in 1:length(ess_ls)){
+  ess_ls_tbl[[i]] <- as_tibble(ess_ls[[i]], rownames = "coeff")
+  ess_ls_tbl[[i]] <- mutate(ess_ls_tbl[[i]], city.time = names(ess_ls)[i], .before = 1)
+}
+ess_tbl <- bind_rows(ess_ls_tbl)
+rm(ess_ls_tbl)
+
+# save summary by city & time period
+summarize_ess(ess_tbl, beta_only = F)
+summarize_ess(ess_tbl, beta_only = T)
 
 # Probability mass function ----
 ## density and PMF computations already performed in Stan
