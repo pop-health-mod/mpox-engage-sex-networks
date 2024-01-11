@@ -109,6 +109,7 @@ pdf("./fig/fig_2_seir_model_fit.pdf",
 p_mod_fit
 dev.off()
 
+## Figure 3 NGM R0/Re ----
 ### Panel A: NGM R_e depleting groups ----
 data_r0 <- read_csv("./out-seir/fit_r0.csv")
 

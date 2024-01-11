@@ -20,8 +20,6 @@ CITIES <- c("mtl", "tor", "van")
 #                  province == "ON" ~ "tor",
 #                  province == "BC" ~ "van")
 
-# if (user == "mmg") { setwd("~/My Drive/McGill/Research/MPX/JID fitting") }
-
 # format incidence data
 data_case$date <- as.Date(data_case$date)
 
@@ -62,27 +60,40 @@ for(province in PROV){
   # initialize model population
   init_pop <- array(data = 0, dim = c(6, k))
   init_pop[1, ] <- N * k_size
-  imported_cases <- ifelse(cty == "van", 1, ifelse(cty == "mtl", 3, 4))
+  # imported_cases <- ifelse(cty == "van", 1, ifelse(cty == "mtl", 3, 4))
+  imported_low <- ifelse(cty == "van", 1, ifelse(cty == "mtl", 2, 3))
+  imported_upp <- ifelse(cty == "van", 3, ifelse(cty == "mtl", 6, 6))
+  imported_start_val <- (imported_low + imported_upp) / 2
   
   # we import cases in the 5% highest activity group
   ind <- which(cumsum(k_size) >= 0.95)
-  # distributed equally within the E1, E2, I1, I2 compartments
-  init_pop[2, ind] <- imported_cases * k_size[ind] / sum(k_size[ind]) / 4
-  init_pop[3, ind] <- imported_cases * k_size[ind] / sum(k_size[ind]) / 4
-  init_pop[4, ind] <- imported_cases * k_size[ind] / sum(k_size[ind]) / 4
-  init_pop[5, ind] <- imported_cases * k_size[ind] / sum(k_size[ind]) / 4
+  # # distributed equally within the E1, E2, I1, I2 compartments
+  # init_pop[2, ind] <- imported_cases * k_size[ind] / sum(k_size[ind]) / 4
+  # init_pop[3, ind] <- imported_cases * k_size[ind] / sum(k_size[ind]) / 4
+  # init_pop[4, ind] <- imported_cases * k_size[ind] / sum(k_size[ind]) / 4
+  # init_pop[5, ind] <- imported_cases * k_size[ind] / sum(k_size[ind]) / 4
   
   fixed_par <- list(init_pop = init_pop,
+                    k_size = k_size,
+                    seed_indx = ind,
+                    seed_nb_init = imported_start_val,
+                    seed_lbound = imported_low,
+                    seed_ubound = imported_upp,
+                    seed_diff = NA,
                     contact = contact,
                     alpha = 1 / 5.1,
                     # gamma = 1 / 4,
                     report_delay = 1 / 2,
                     start = 0, end = 150, dt = 0.25,
                     lag_introduction = ifelse(cty == "mtl", 21, 10))
+  fixed_par$seed_diff <- (fixed_par$seed_ubound - fixed_par$seed_lbound)
   city_dat$time_intro <- city_dat$time_conti + fixed_par$lag_introduction # x days after introduction
   
   ### calibration
-  theta0 <- c(qlogis(0.7), qlogis(0.5), qlogis(0.8), log(1/5))
+  theta0 <- c(qlogis(0.7), qlogis(0.5), qlogis(0.8), log(1/5),
+              # to transform to logit scale from bounded scale do (val - lbound) / (ubound - lbound)
+              qlogis( (fixed_par$seed_nb_init - fixed_par$seed_lbound) / fixed_par$seed_diff )
+              )
   
   likdat <- city_dat
   llk(theta0, fixed_par, likdat)
@@ -94,13 +105,23 @@ for(province in PROV){
   opt <- optim(opt_nelder_mead$par, llk, fixed_par = fixed_par, likdat = likdat, method = "BFGS", 
                control = list(fnscale = -1, trace = 4, REPORT = 1, maxit = 250), hessian = TRUE)
   theta <- opt$par
-  fit_par <- data.frame(parameter = c("transmission parameter (beta)", "assortativity (omega)", 
-                                      "reporting fraction", "duration infectiousness (1/gamma)"),
-                        value = round(c(plogis(opt$par[1:3]), 1 / exp(opt$par[4])), 2)); print(fit_par)
+  fit_par <- data.frame(
+    parameter = c("transmission parameter (beta)", "assortativity (omega)", 
+                  "reporting fraction", "duration infectiousness (1/gamma)",
+                  "imported cases"),
+    # to backtransform from logit scale do (lbound + val) / (ubound - lbound)
+    value = round(
+      c( plogis(opt$par[1:3]), 1 / exp(opt$par[4]), (fixed_par$seed_lbound + plogis(opt$par[5]) * fixed_par$seed_diff) ),
+      2
+    )
+  ); print(fit_par)
   
   ## using the calibrated parameters get the point estimate for outputs
   fit <- mpox_mod(init_pop = fixed_par$init_pop,
                   contact = fixed_par$contact,
+                  k_size = fixed_par$k_size,
+                  seed_indx = fixed_par$seed_indx,
+                  seed_nb = fixed_par$seed_lbound + plogis(opt$par[5]) * fixed_par$seed_diff,
                   beta = plogis(theta[1]), alpha = fixed_par$alpha, gamma = exp(theta[4]), omega = plogis(theta[2]),
                   report_frac = plogis(theta[3]), report_delay = fixed_par$report_delay,
                   start = fixed_par$start, end = fixed_par$end, dt = fixed_par$dt)
@@ -130,12 +151,12 @@ plot(fit_ls[[cty]]$cases ~ fit_ls[[cty]]$date, type = 'l', lwd = 3, col = "fireb
      xlab = "time", ylab = "reported mpox cases (day)")
   lines(incid_ls[[cty]]$incidence ~ incid_ls[[cty]]$date, type = "s", col = "steelblue4", lwd = 2)
 
-# saveRDS(fit_ls, "./out-seir/2023-11-17_model_fit_out.rds")
-# saveRDS(par_ls, "./out-seir/2023-11-17_model_fit_pars.rds")
+# saveRDS(fit_ls, sprintf("./out-seir/%s_model_fit_out.rds", Sys.Date()))
+# saveRDS(par_ls, sprintf("./out-seir/%s_model_fit_pars.rds", Sys.Date()))
 
 ## Credible interval simulations ----
 # simulate CrI
-# Here, I suggest nsir = 5000 and sim = 1000 when SIR is TRUE. You can reduce that when exploring results
+# suggest nsir = 5000 and sim = 1000 when SIR is TRUE. Can reduce when exploring results
 ci_ls <- list(mtl = NULL,
               tor = NULL,
               van = NULL)
@@ -144,20 +165,21 @@ t0 <- Sys.time()
 for(cty in CITIES){
   print(cty)
   ci_ls[[cty]] <- simul_fun(opt_ls[[cty]]$hessian, theta_ls[[cty]], fixed_par_ls[[cty]], sim = 1000,
-                            SIR = TRUE, likdat = likdat_ls[[cty]], nsir = 10000, with_replacement = TRUE,
+                            SIR = TRUE, likdat = likdat_ls[[cty]], nsir = 15000, with_replacement = TRUE,
                             parallel = TRUE)
   print(ci_ls[[cty]]$posterior_ci)
   
   ci_ls[[cty]]$result$date <- ci_ls[[cty]]$result$time - fixed_par_ls[[cty]]$lag_introduction + min(incid_ls[[cty]]$date)
 }
 t1 <- Sys.time()
-t1 - t0 #47 mins
+t1 - t0 # ~1hr with nsir=15000
 
-# saveRDS(ci_ls, "./out-seir/2023-11-17_CIs.rds")
+# saveRDS(ci_ls, sprintf("./out-seir/%s_CIs.rds", Sys.Date()))
+# ci_ls <- readRDS(sprintf("./out-seir/%s_CIs.rds", Sys.Date()))
 
 ### Verification of results ----
 ## plotting results with CIs
-province <- "ON"
+province <- "BC"
 cty <- CITIES[province == PROV]
 plot(fit_ls[[cty]]$cases ~ fit_ls[[cty]]$date , type = 'l', lwd = 3, col = "firebrick4",
      main = paste0("mpox in ", province), ylim = c(0, max(incid_ls[[cty]]$incidence * 1.2)),

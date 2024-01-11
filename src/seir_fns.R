@@ -1,10 +1,22 @@
 # Mpox SEIR model ----
 mpox_mod <- function(init_pop = init_pop,
                      contact = contact,
+                     k_size = k_size,
+                     seed_indx = seed_indx,
+                     seed_nb = seed_nb,
                      beta = 0.7, alpha = 1 / 5.1, gamma = 1 / 5, omega = 0.5,
                      report_frac = 0.7, report_delay = 1 / 2, diag_ass = TRUE,
                      start = 0, end = 90, dt = 0.01,
                      calibration = FALSE) {
+  
+  # seed cases
+  # we import cases in the 5% highest activity group
+  # ind <- which(cumsum(k_size) >= 0.95)
+  # distributed equally within the E1, E2, I1, I2 compartments
+  init_pop[2, seed_indx] <- seed_nb * k_size[seed_indx] / sum(k_size[seed_indx]) / 4
+  init_pop[3, seed_indx] <- seed_nb * k_size[seed_indx] / sum(k_size[seed_indx]) / 4
+  init_pop[4, seed_indx] <- seed_nb * k_size[seed_indx] / sum(k_size[seed_indx]) / 4
+  init_pop[5, seed_indx] <- seed_nb * k_size[seed_indx] / sum(k_size[seed_indx]) / 4
   
   # model time step  
   niter <- (end - start) / dt + 1
@@ -116,18 +128,28 @@ mpox_mod <- function(init_pop = init_pop,
 }
 
 # ---- log-likelihood ----
-## TODO CLEAN UP FUNCTIONS
-## TODO ADD COMMENTS TO DOCUMENT
 prior_dens <- function(theta) {
   # priors
-  # plogis(qlogis(0.5) + c(-1, 1) * qnorm(0.95) * 2) # beta (transmission parameter)
-  # plogis(qlogis(0.5) + c(-1, 1) * qnorm(0.95) * 1) # omega (mixing)
-  # plogis(qlogis(0.8) + c(-1, 1) * qnorm(0.95) * 1) # reporting fraction
-  # 1 / exp(log(1/3) + c(1, -1) * qnorm(0.95) * 0.5) # duration of infectiousness
+  # plogis(qlogis(0.5) + c(-1, 1) * qnorm(0.975) * 2)   # beta (transmission parameter)
+  # plogis(qlogis(0.5) + c(-1, 1) * qnorm(0.975) * 1)   # omega (mixing)
+  # plogis(qlogis(0.8) + c(-1, 1) * qnorm(0.975) * 1)   # reporting fraction
+  # 1 / exp(log(1/3) + c(1, -1)   * qnorm(0.975) * 0.5) # duration of infectiousness
+  # fixed_par$seed_lbound + plogis(qlogis(0.5) + c(-1, 1) * qnorm(0.975) * 0.5) * (fixed_par$seed_diff)            # number of imported cases
+  # theta[5], e.g. Montreal
+  # lbound = 2; ubound = 6
+  # x <- rnorm(10000, mean = 0, sd = 0.5)
+  # y <- lbound + plogis( x ) * ( ubound - lbound )
+  # z <- seq(0, 8, by = 0.01)
+  # par(mfrow = c(1 ,3))
+  # hist(x, main = "x ~ Normal(0, 1.55)")
+  # hist(y, breaks = 25, xlim = c(0, 8), main = "logit-1(x)*(6-2) + 2")
+  # plot(z, dunif(z, lbound, ubound), type = 'l', main = "U(2, 6)")
+  
   log_prior <- dnorm(theta[1], mean = qlogis(0.5), sd = 2, log = TRUE) +
                dnorm(theta[2], mean = qlogis(0.5), sd = 1, log = TRUE) +
                dnorm(theta[3], mean = qlogis(0.8), sd = 1, log = TRUE) +
-               dnorm(theta[4], mean = log(1 / 3), sd = 0.5, log = TRUE) 
+               dnorm(theta[4], mean = log(1 / 3), sd = 0.5, log = TRUE) +
+               dnorm(theta[5], mean = qlogis(0.5), sd = 0.5, log = TRUE)
   return(log_prior)
   
 }
@@ -139,6 +161,9 @@ llk <- function(theta, fixed_par, likdat, calibration = TRUE) {
   # getting predictions
   val <- mpox_mod(init_pop = fixed_par$init_pop,
                   contact = fixed_par$contact,
+                  k_size = fixed_par$k_size,
+                  seed_indx = fixed_par$seed_indx,
+                  seed_nb = fixed_par$seed_lbound + plogis(theta[5]) * fixed_par$seed_diff,
                   beta = plogis(theta[1]), alpha = fixed_par$alpha, gamma = exp(theta[4]), omega = plogis(theta[2]),
                   report_frac = plogis(theta[3]), report_delay = fixed_par$report_delay,
                   start = fixed_par$start, end = ceiling(max(likdat$time_intro)), dt = fixed_par$dt,
@@ -169,7 +194,7 @@ getci <- function(df) {
 simul_fun <- function(hessian, theta, fixed_par, sim = 1000, 
                       SIR = TRUE, nsir = 1000, likdat = NULL,
                       with_replacement = TRUE, track_sims = FALSE,
-                      parallel = TRUE) {
+                      parallel = TRUE, halt_if_wgt_large = FALSE) {
   # From the hessian, simulate the model
   vcova <- Matrix::solve(-hessian)
   
@@ -196,11 +221,12 @@ simul_fun <- function(hessian, theta, fixed_par, sim = 1000,
     if (is.null(likdat)) { print('SIR needs to include <likdat>'); break }
     # Sample parameters from multivariate t-distribution to get thicker tails
     par_sir <- mvtnorm::rmvt(n = nsir, delta = theta, sigma = as.matrix(vcova), df = 2)
+    
     # We add the mode to the resampled values (to be sure that it is included in the CI)
     par_sir <- rbind(par_sir, theta)
     prp_dens <- mvtnorm::dmvt(par_sir, theta, as.matrix(vcova), df = 2, log = TRUE)
     
-    if (parallel == FALSE)  {
+    if (parallel == FALSE)  { # single-core sampling
       # You might get some warnings, that's OK, the function will return NA
       # and we replace them with -Inf in the llk. We suppress them.
       loglikelihood_sir <- suppressWarnings(
@@ -210,7 +236,7 @@ simul_fun <- function(hessian, theta, fixed_par, sim = 1000,
           }
         )
       )
-    } else {
+    } else { # parallelized sampling
       require(doParallel)
       cl <- parallel::makeCluster(parallel::detectCores() - 1)
       doParallel::registerDoParallel(cl)
@@ -230,7 +256,9 @@ simul_fun <- function(hessian, theta, fixed_par, sim = 1000,
     samp <- par_sir[resampleid,, drop = FALSE]
     nunique <- length(unique(resampleid))
     max_wgt <- max(wgt, na.rm = TRUE)
+    
     if (max_wgt > 0.1) { print(paste('Caution, maximum weight is ', round(max_wgt, 2), " consider increasing sim or sampling without replacement (latter option is not the best)")) }
+    if (max_wgt > 0.1 & halt_if_wgt_large){ stop("Exit execution due to large weights") }
     print(paste(nunique, 'unique parameter sets resampled'))
   }     
   
@@ -240,6 +268,9 @@ simul_fun <- function(hessian, theta, fixed_par, sim = 1000,
     if(track_sims & s %% 100 == 0){ print(sprintf("%s out of %s sims", s, sim)) }
     tmp <- mpox_mod(init_pop = fixed_par$init_pop,
                     contact = fixed_par$contact,
+                    k_size = fixed_par$k_size,
+                    seed_indx = fixed_par$seed_indx,
+                    seed_nb = fixed_par$seed_lbound + plogis(samp[s, 5]) * fixed_par$seed_diff,
                     beta = plogis(samp[s, 1]), alpha = fixed_par$alpha, gamma = exp(samp[s, 4]), omega = plogis(samp[s, 2]),
                     report_frac = plogis(samp[s, 3]), report_delay = fixed_par$report_delay,
                     start = fixed_par$start, end = fixed_par$end, dt = fixed_par$dt)
@@ -256,12 +287,15 @@ simul_fun <- function(hessian, theta, fixed_par, sim = 1000,
                        rt_lci = res_rt$lower,
                        rt_uci = res_rt$upper)
   par_ci <- getci(samp)
-  posterior_par <- data.frame(names = c("transmission parameter (beta)", 
-                                        "assortativity (omega)", 
-                                        "reporting fraction", 
-                                        "duration infectiousness (1/gamma)"),
-                              lci = c(plogis(par_ci$lower[1:3]), 1 / exp(par_ci$upper[4])),
-                              uci = c(plogis(par_ci$upper[1:3]), 1 / exp(par_ci$lower[4])))
+  posterior_par <- data.frame(
+    names = c("transmission parameter (beta)", 
+              "assortativity (omega)", 
+              "reporting fraction", 
+              "duration infectiousness (1/gamma)",
+              "imported cases"),
+    lci = c(plogis(par_ci$lower[1:3]), 1 / exp(par_ci$upper[4]), fixed_par$seed_lbound + plogis(par_ci$lower[5]) * fixed_par$seed_diff),
+    uci = c(plogis(par_ci$upper[1:3]), 1 / exp(par_ci$lower[4]), fixed_par$seed_lbound + plogis(par_ci$upper[5]) * fixed_par$seed_diff)
+  )
   
   return(list(result = result, posterior_ci = posterior_par, posterior_samples = samp))
 }
