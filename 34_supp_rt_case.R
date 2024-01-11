@@ -71,8 +71,8 @@ for(i in 1:length(PROVS)){
     config = make_config(
       t_start = t_start,
       t_end = t_end,
-      mean_si = 8.8,
-      std_si = 8.7,
+      mean_si = 9.0,
+      std_si = 8.9,
       mean_prior = 3,
       std_prior = 2
     )

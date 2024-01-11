@@ -26,9 +26,9 @@ data_ipcw <- data_ipcw %>%
   )
 
 ## load Engage data
-data_3cities_pre_ipcw <- read_csv("../mpx-engage-params/data-3cities-feb-2023/pre_ipcw_3cities.csv")
-data_3cities_pand_ipcw <- read_csv("../mpx-engage-params/data-3cities-feb-2023/pand_ipcw_3cities.csv")
-data_3cities_post_ipcw <- read_csv("../mpx-engage-params/data-3cities-feb-2023/post_ipcw_3cities.csv")
+data_3cities_pre_ipcw <- read_csv("../mpx-engage-params/data-processed/pre_ipcw_3cities.csv")
+data_3cities_pand_ipcw <- read_csv("../mpx-engage-params/data-processed/pand_ipcw_3cities.csv")
+data_3cities_post_ipcw <- read_csv("../mpx-engage-params/data-processed/post_ipcw_3cities.csv")
 
 # create single dataset with all time periods & cities
 data_3cities <- bind_rows(
@@ -74,7 +74,6 @@ yaxis <- grid::textGrob(
 )
 
 ## select cut-offs to show and turn into proportion
-# TODO harmonize sizing of legends between time points and city
 prop_at_least_x <- data_ipcw %>% 
   filter(y_pred %in% c(25, 50, 100, 150)) %>% 
   arrange(y_pred, city, time_pt) 
@@ -188,7 +187,6 @@ p_fit_check <- plot_cdf_fit(data_ipcw, "city", # plots fitted data
   labs(col = NULL) +
   
   # fix proportions of plot elements
-  # adjust bold face, and caption position
   theme(
     legend.position = "none",                # not needed because of wrapping
     

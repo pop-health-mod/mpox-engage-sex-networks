@@ -186,11 +186,6 @@ t1 - t0 # ~11 minutes (regression and PMF)
 ## Inspect model convergence diagnostic ----
 # convergence of model chains (traceplots)
 for(cur_city in CITIES_DATAPTS){
-  # MCMCtrace(fit_bayes_ls[[cur_city]], 
-  #           params = c("alpha", "beta", "phi"),
-  #           filename = paste0("traceplot-", cur_city),
-  #           wd = sprintf("%s/model-checks-p6m-all", fig_path),
-  #           open_pdf = F)
   if(DO_ZINF){
     shape_vars <- c("shape", "zi")
   } else {

@@ -44,7 +44,7 @@ for(cur_city in CITIES_DATAPTS){
 }
 rm(pmf_tmp)
 
-# collapse into
+# collapse into single dataframe
 pmf_wt_by_city <- bind_rows(pmf_wt_by_city)
 pmf_wt_by_city$data_pt <- factor(pmf_wt_by_city$data_pt, levels = CITIES_DATAPTS)
 

@@ -160,11 +160,6 @@ t1 - t0 # 11 mins
 # Inspect model results ----
 # model convergence diagnostic
 for(cur_city in CITIES_DATAPTS){
-  # MCMCtrace(fit_bayes_ls[[cur_city]],
-  #           params = c("alpha", "beta", "phi"),
-  #           filename = paste0("traceplot-", cur_city),
-  #           wd = sprintf("./figures-3cities/negbin-res/model-check%s", ifelse(file_suff == "p6m_all", "", "-anal-partn")),
-  #           open_pdf = F)
   cur_p_trace_plot <- traceplot(fit_bayes_ls[[cur_city]], pars = c("alpha", "beta", "phi"))
   ggsave(sprintf("%s/model-checks-p6m-all-%s-%s.png", fig_path, which(cur_city == CITIES_DATAPTS), cur_city),
          cur_p_trace_plot, device = "png",
