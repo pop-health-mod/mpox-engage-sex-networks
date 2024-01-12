@@ -7,7 +7,7 @@ theme_set(theme_bw())
 ## mpox parameters
 # get infectious duration from fit model
 df_pars <- read.csv("./out-seir/fit_pars.csv")
-# infectious duration
+# infectious duration (can also use ~3.9-4.0 as placeholder)
 D = subset(df_pars, city == "all" & parameter == "duration infectiousness (1/gamma)")$value
 # latency duration
 D_apostr = 5.1
