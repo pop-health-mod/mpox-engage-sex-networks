@@ -95,7 +95,7 @@ data_rt <- full_join(df_time, data_rt, by = c("prov_en", "t_end"))
 data_rt$prov_en <- factor(data_rt$prov_en, levels = PROVS)
 
 # see when Rt stablizes
-png("./fig/fig_S7_rt.png",
+png("./fig/fig_S8_rt.png",
     width = 16, height = 12, units = "cm", res = 600)
 
 ggplot(data_rt, aes(x = t_end)) +
