@@ -76,3 +76,10 @@ compute_ipcw <- function(cur_city, covariates, data_timept, data_list){
   
   return(data_list)
 }
+
+# compute the correlation between the outcome and the LTFU indicator
+cor_outcome_ltfu <- function(data, outcome_var = "nb_part_over5"){
+  print(
+    with(data, cor(get(outcome_var), ltfu))
+  )
+}
