@@ -1,9 +1,9 @@
 # Libraries ----
 library(tidyverse)
 library(data.table)
-library(parallel)
-library(foreach)
-library(doParallel)
+# library(parallel)
+# library(foreach)
+# library(doParallel)
 source("./src/plot.R")
 
 # Source NB regression fit ----
@@ -59,6 +59,7 @@ data_mean_nb_partn <- pmf_wt_by_city %>%
   mutate(type = "neg. bin.")
 
 data_mean_nb_partn
+data_mean_nb_partn <- mutate(data_mean_nb_partn, across(mean_wt:cr.i_upp, \(x) round(x, 1)))
 
 if(outcome_var == "nb_part_ttl" & !DO_ZINF){
   write_csv(data_mean_nb_partn, "./out/text_mean_partn.csv")
@@ -147,15 +148,6 @@ write.csv(cdf_wt_by_city,
 # post- vs pre-
 cdf_comparison_by_city <- create_city_list(CITIES)
 
-# start a cluster
-numCores <- parallel::detectCores()
-numCores
-numCores <- numCores - 1
-cl <- parallel::makeCluster(numCores, type = "PSOCK")
-
-# register
-doParallel::registerDoParallel(cl = cl)
-
 t0 <- Sys.time()
 for(city_name in CITIES){
   print(city_name)
@@ -165,14 +157,20 @@ for(city_name in CITIES){
   pmf_pand <- pmf_iter[[paste(city_name, "Pandemic", sep = "-")]]
   pmf_post <- pmf_iter[[paste(city_name, "Post-Restrictions", sep = "-")]]
   
+  # scramble (confirmed that values are the same even when posteriors are ordered differently)
+  # pmf_pre <- pmf_pre[sample(1:301, 301, FALSE), ]
+  # pmf_pand <- pmf_pand[sample(1:301, 301, FALSE), ]
+  # pmf_post <- pmf_post[sample(1:301, 301, FALSE), ]
+  
   # compare for >=100 partners
-  cdf_comparison_by_city_tmp <-  foreach( cur_iter = 1:nrow(pmf_pre) ) %dopar% {
-    compare_timepts(
-      pmf_1 = pmf_pre,
-      pmf_2 = pmf_pand,
-      pmf_3 = pmf_post,
-      degree_cutoff = 25
-    )
+  cdf_comparison_by_city_tmp <- vector("list", length = nrow(pmf_pre))
+  for(cur_iter in 1:nrow(pmf_pre)){
+    cdf_comparison_by_city_tmp[[cur_iter]] <- compare_timepts(
+          pmf_1 = pmf_pre[cur_iter, ],
+          pmf_2 = pmf_pand[cur_iter, ],
+          pmf_3 = pmf_post[cur_iter, ],
+          degree_cutoff = 25
+        )
   }
   
   # get the % in each comparison that returned TRUE
@@ -190,7 +188,7 @@ for(city_name in CITIES){
 }
 rm(pmf_pre, pmf_pand, pmf_post)
 t1 <- Sys.time()
-t1 - t0 # 3.7 mins
+t1 - t0 # 5 seconds
 
 ## within the 1st and 3rd time periods, compare ----
 # Toronto vs Montreal
@@ -205,12 +203,18 @@ for(time_pt_name in TIMEPTS){
   pmf_tor <- pmf_iter[[paste("Toronto", time_pt_name, sep = "-")]]
   pmf_van <- pmf_iter[[paste("Vancouver", time_pt_name, sep = "-")]]
   
+  # scramble (confirmed that values are the same even when posteriors are ordered differently)
+  # pmf_mtl <- pmf_mtl[sample(1:301, 301, FALSE), ]
+  # pmf_tor <- pmf_tor[sample(1:301, 301, FALSE), ]
+  # pmf_van <- pmf_van[sample(1:301, 301, FALSE), ]
+  
   # compare for >=100 partners
-  cdf_comparison_by_timept_tmp <-  foreach( cur_iter = 1:nrow(pmf_mtl) ) %dopar% {
-    compare_cities(
-      pmf_mtl = pmf_mtl,
-      pmf_tor = pmf_tor,
-      pmf_van = pmf_van,
+  cdf_comparison_by_timept_tmp <- vector("list", length = nrow(pmf_mtl))
+  for(cur_iter in 1:nrow(pmf_mtl)){
+    cdf_comparison_by_timept_tmp[[cur_iter]] <- compare_cities(
+      pmf_mtl = pmf_mtl[cur_iter, ],
+      pmf_tor = pmf_tor[cur_iter, ],
+      pmf_van = pmf_van[cur_iter, ],
       degree_cutoff = 100
     )
   }
@@ -231,13 +235,15 @@ for(time_pt_name in TIMEPTS){
 }
 rm(pmf_mtl, pmf_tor, pmf_van)
 t1 <- Sys.time()
-t1 - t0
-
-stopCluster(cl)
+t1 - t0 # 5 seconds
 
 ## Output results ----
 dat_cdf_by_city <- bind_rows(cdf_comparison_by_city)
 dat_cdf_by_timept <- bind_rows(cdf_comparison_by_timept)
+
+# round & save
+dat_cdf_by_city <- mutate(dat_cdf_by_city, across(pre_largeq_pand:pre_largeq_post, \(x) round(x, 2)))
+dat_cdf_by_timept <- mutate(dat_cdf_by_timept, across(tor_largeq_mtl:van_largeq_mtl, \(x) round(x, 2)))
 
 if(outcome_var == "nb_part_ttl" & !DO_ZINF){
   write.csv(dat_cdf_by_city, "./out/text_tail_compare_largeq25_by_city.csv")

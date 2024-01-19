@@ -55,5 +55,4 @@ rsconnect/
 
 # temporary outputs
 /out-seir/
-/out/text_*
 /out-tmp/
