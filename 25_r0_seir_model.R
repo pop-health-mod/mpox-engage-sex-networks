@@ -335,6 +335,27 @@ df_pars <- bind_rows(df_pars_avg, df_pars); rm(df_pars_avg)
 df_pars
 write.csv(df_pars, "./out-seir/fit_pars.csv", row.names = FALSE)
 
+### Format parameters ----
+# parameter order for final output
+df_pars$parameter <- factor(df_pars$parameter,
+                            levels = c("duration infectiousness (1/gamma)",
+                                       "transmission parameter (beta)",
+                                       "assortativity (omega)",
+                                       "reporting fraction",
+                                        "imported cases"))
+df_pars <- arrange(df_pars, parameter, city)
+
+# put 'all' mean at the start
+df_pars <- bind_rows(filter(df_pars, city == "all"), filter(df_pars, city != "all"))
+
+# create CrI column
+df_pars[, 3:5] <- round(df_pars[, 3:5], 2)
+df_pars$cri <- sprintf("(%s\u2013%s)", df_pars$lci, df_pars$uci)
+df_pars$cri[is.na(df_pars$lci)] <- NA_character_
+
+# save table
+write.csv(df_pars, "./out/manuscript-tables/table_S2_seir_params.csv", row.names = FALSE)
+
 ## R0 and R_eff ----
 ### post-restrictions R0
 head(df_r0)
