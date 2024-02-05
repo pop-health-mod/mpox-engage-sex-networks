@@ -140,7 +140,6 @@ write.csv(cdf_wt_by_city,
 
 # cut-off above which to compute the CDF for the comparisons
 # i.e., compute % of population reporting >=x degree of partners
-# degree <- 25
 
 ## within each city, compare ----
 # pandemic vs pre-,
@@ -162,7 +161,7 @@ for(city_name in CITIES){
   # pmf_pand <- pmf_pand[sample(1:301, 301, FALSE), ]
   # pmf_post <- pmf_post[sample(1:301, 301, FALSE), ]
   
-  # compare for >=100 partners
+  # compare for >=25 partners
   cdf_comparison_by_city_tmp <- vector("list", length = nrow(pmf_pre))
   for(cur_iter in 1:nrow(pmf_pre)){
     cdf_comparison_by_city_tmp[[cur_iter]] <- compare_timepts(
