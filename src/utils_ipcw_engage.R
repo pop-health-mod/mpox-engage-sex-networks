@@ -32,7 +32,7 @@ calc.ipcw <- function(data, ltfu, prds, wgt = rep(1., nrow(data))) {
   
   stopifnot(all(ltfu == 0 | ltfu == 1))
   
-  wgt <- wgt * nrow(data) / sum(wgt) # weights normalization
+  # wgt <- wgt * nrow(data) / sum(wgt) # weights normalization (already normalized in data cleaning)
   
   mdl <- formula(paste('ltfu', paste(prds, collapse='+'), sep='~'))
   fit <- glm(mdl, quasibinomial, data, wgt)
