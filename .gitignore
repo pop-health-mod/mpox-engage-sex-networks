@@ -52,6 +52,7 @@ rsconnect/
 /fig/results-checks*
 /out/fitted-*
 /out/*.rds
+/misc-data-proc-jk/outputs/
 
 # temporary outputs
 /out-seir/
