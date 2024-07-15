@@ -1,50 +1,24 @@
 # Library and data----
 library(tidyverse)
 
-## main analyses
-outcome_var <- "nb_part_ttl"
-
-## define paths & prefixes based on the analysis being done
-fig_path <- "./misc-data-proc-JK/outputs"
-out_distr_path <- "./misc-data-proc-JK/outputs"
-
 ## load data
-data_3cities_pre_ipcw <- read_csv("../mpx-engage-params/data-processed/pre_ipcw_3cities.csv")
-# data_3cities_pand_ipcw <- read_csv("../mpx-engage-params/data-processed/pand_ipcw_3cities.csv")
-# data_3cities_post_ipcw <- read_csv("../mpx-engage-params/data-processed/post_ipcw_3cities.csv")
-
-# create single dataset with all time periods & cities
-# data_3cities <- bind_rows(
-#   data_3cities_pre_ipcw,
-#   data_3cities_pand_ipcw,
-#   data_3cities_post_ipcw
-# ) %>%
-#   mutate(time_pt = factor(time_pt, 
-#                           levels = c("Pre-Pandemic", "Pandemic", "Post-Restrictions"))) %>%
-#   mutate(city = recode_factor(city, mtl = "Montreal", trt = "Toronto", van = "Vancouver"))
-data_3cities <- data_3cities_pre_ipcw
+data_3cities <- read_csv("../mpx-engage-params/data-processed/engage_baseline_3cities.csv")
 
 # create city marker
 CITIES <- c("Montreal", "Toronto", "Vancouver")
 # TIMEPTS <- c("Pre-Pandemic", "Pandemic", "Post-Restrictions")
 
-# table(data_3cities$time_pt, 
-#       data_3cities$city, 
-#       useNA = "ifany")
-# 
-# data_3cities <- data_3cities %>% 
-#   mutate(
-#     data_pt = factor(paste(city, time_pt, sep = "-"),
-#                      levels = paste(rep(CITIES, each = 3), TIMEPTS, sep = "-"))
-#   )
+# recode names of partnership status
+unique(data_3cities$rel_status)
+data_3cities <- data_3cities %>% 
+  mutate(
+    rel_status_orig = rel_status,
+    rel_status = factor(rel_status,
+                        levels = c("open", "exclusive", "unclear", "no relationship"),
+                        labels = c("main-open", "main-exclusive", "main-unclear", "no-main"))
+  )
 
-# CITIES_DATAPTS <- paste(
-#   rep(CITIES, each = 3), 
-#   rep(c("Pre-Pandemic", "Pandemic", "Post-Restrictions"), 
-#       times = 3), 
-#   sep = "-"
-# )
-
+table(og = data_3cities$rel_status_orig, recode = data_3cities$rel_status)
 
 # Compute empiric distribution ----
 # compute number of participants in each relationship status
@@ -86,6 +60,17 @@ dat_partn_distr <- data_3cities %>%
   mutate(p = n / sum(n), p.rds = n.rds / sum(n.rds)) %>% 
   ungroup()
 
+## pad dataframe
+dat_partn_distr <- dat_partn_distr %>% 
+  complete(
+    city, rel_status, x = 0:300,
+    fill = list(n = 0, n.rds = 0, p = 0, p.rds = 0)
+  )
+
+
+# verify padding
+nrow(dat_partn_distr)
+length(0:300) * length(unique(data_3cities$city)) * length(unique(data_3cities$rel_status))
 
 ## verify the proportions sum to 1 and the n's sum to the city
 unique(dat_nb_rel[, c("city", "n_city")])
@@ -97,6 +82,6 @@ tapply(dat_partn_distr$p, paste(dat_partn_distr$city, dat_partn_distr$rel_status
 tapply(dat_partn_distr$p.rds, paste(dat_partn_distr$city, dat_partn_distr$rel_status, sep = "-"), sum)
 
 ## save data ----
-write.csv(x = dat_nb_rel, file = "./misc-data-proc-JK/outputs/engage_relat_distribution.csv", row.names = F)
-write.csv(x = dat_partn_distr, file = "./misc-data-proc-JK/outputs/engage_nb_partn_p6m_by_relat_stat.csv", row.names = F)
+write.csv(x = dat_nb_rel, file = "./misc-data-proc-jk/outputs/engage_relat_distribution.csv", row.names = F)
+write.csv(x = dat_partn_distr, file = "./misc-data-proc-jk/outputs/engage_nb_partn_p6m_by_relat_stat.csv", row.names = F)
 

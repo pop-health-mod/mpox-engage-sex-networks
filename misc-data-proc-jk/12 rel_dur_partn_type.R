@@ -1,193 +1,238 @@
 # Library and data----
 library(tidyverse)
-
-## main analyses
-outcome_var <- "nb_part_ttl"
+library(lubridate)
 
 ## define paths & prefixes based on the analysis being done
-fig_path <- "./misc-data-proc-JK/outputs"
-out_distr_path <- "./misc-data-proc-JK/outputs"
+fig_path <- "./misc-data-proc-jk/outputs"
+out_distr_path <- "./misc-data-proc-jk/outputs"
 
 ## load data
-data_3cities_pre_ipcw <- read_csv("../mpx-engage-params/data-processed/pre_ipcw_3cities.csv")
+data_3cities <- read_csv("../mpx-engage-params/data-processed/engage_baseline_3cities.csv")
+data_partn <- read_csv("../mpx-engage-params/data-processed/engage_partners_3cities.csv")
+data_partn <- data_partn[data_partn$visit_num == 1, ] # N=9,043
+
+# create city marker
+CITIES <- sort( unique(data_3cities$city) )
 
 ## proceed with grouping by relationship status
 # reorder by turning into a factor
-data_base <- data_base %>% 
+unique(data_partn$reltn_type)
+data_partn$reltn_type[data_partn$reltn_type == "sex work"] <- "sex-work"
+data_partn <- data_partn %>% 
   mutate(reltn_type = factor(
     reltn_type,
-    c("one-time", "casual", "main", "sex work", "PNA"))
+    c("one-time", "casual", "main", "sex-work"))
   )
 
-# exclude 3 individuals who didn't report any relations
-data_base <- filter(data_base, !is.na(partner_id))
+RELTN_TYPES <- levels(data_partn$reltn_type)
 
-# exclude 257 relationships that happened >6 months ago (6% of entries)
-table(data_base$reltn_too_long_ago, useNA = "ifany")
+data_partn <- left_join(data_partn,
+                        data_3cities[, c("city", "part_id", "date_intv",
+                                         "wt_rds", "wt_rds_norm")],
+                        by = c("part_id")) %>% 
+  select(city, part_id, visit_num, date_intv, wt_rds, wt_rds_norm,
+         partner_id:p6m_sex_num_pna)
 
-# exclude entries for implausible relationship dates (5%)
-table(data_base$implausible_reltn, useNA = "ifany")
+## Data cleaning - partnership duration ----
+data_partn <- mutate(data_partn,
+                     rel_length = as.numeric(recent_sex_date - first_sex_date),
+                     .after = recent_sex_date)
 
-data_base <- filter(data_base, !reltn_too_long_ago | is.na(reltn_too_long_ago))
-data_base <- filter(data_base, is.na(implausible_reltn))
+# fix NAs (n=44)
+data_partn[is.na(data_partn$rel_length), ]
+table(data_partn$reltn_type[is.na(data_partn$rel_length)])
+data_partn$rel_length[is.na(data_partn$rel_length)] <- 1
 
-tapply(data_base$par_duration, data_base$reltn_type, summary)
-tapply(data_base$par_duration/30, data_base$reltn_type, summary)
+# fix relationship lengths caused by not having day for first_sex (n=2,156)
+table(data_partn$rel_length <= 0)
+table(data_partn$rel_length <= 0 & 
+        year(data_partn$first_sex_date) == year(data_partn$recent_sex_date) & 
+        month(data_partn$first_sex_date) == month(data_partn$recent_sex_date))
+data_partn$rel_length[data_partn$rel_length <= 0 & 
+                        year(data_partn$first_sex_date) == year(data_partn$recent_sex_date) & 
+                        month(data_partn$first_sex_date) == month(data_partn$recent_sex_date)] <- 1
 
-# Descriptive analyses ----
-## Number of partners reported ----
-# tabulate number of respondents in each relationship status
-data_nb_partn <- data_demo %>% 
-  mutate() %>% 
-  group_by(rel_status) %>% 
-  summarize(N_total = n(),
-            wt_total = sum(wt))
+# assume if month is off by just one same situation as above (n=126)
+table(data_partn$rel_length <= 0)
+table(data_partn$rel_length <= 0 & 
+        # both within same year
+        (year(data_partn$first_sex_date) == year(data_partn$recent_sex_date) & 
+        month(data_partn$first_sex_date) == (month(data_partn$recent_sex_date) + 1)) |
+        # first recorded as year Jan and recent happened in (year-1) Dec
+        ((year(data_partn$first_sex_date) - 1) == year(data_partn$recent_sex_date) & 
+           month(data_partn$first_sex_date) == (month(data_partn$recent_sex_date) == 12)))
+data_partn$rel_length[data_partn$rel_length <= 0 & 
+                        (year(data_partn$first_sex_date) == year(data_partn$recent_sex_date) & 
+                           month(data_partn$first_sex_date) == (month(data_partn$recent_sex_date) + 1)) |
+                        ((year(data_partn$first_sex_date) - 1) == year(data_partn$recent_sex_date) & 
+                           month(data_partn$first_sex_date) == (month(data_partn$recent_sex_date) == 12))] <- 1
 
-# tabulate total number of partners reported by relationship status and partner type
-tmp_nb_partn <- data_base %>% 
-  count(rel_status, reltn_type, name = "nb_partn_rep")
+# assume typo if month is same but year off by 1, if month matches then assume recent=first (n=34)
+table(data_partn$rel_length <= 0)
+table(data_partn$rel_length <= 0 & 
+        (year(data_partn$first_sex_date) - 1) == year(data_partn$recent_sex_date) & 
+        month(data_partn$first_sex_date) == month(data_partn$recent_sex_date))
+data_partn$rel_length[data_partn$rel_length <= 0 & 
+                        (year(data_partn$first_sex_date) - 1) == year(data_partn$recent_sex_date) & 
+                        month(data_partn$first_sex_date) == month(data_partn$recent_sex_date)] <- 1
 
-data_nb_partn <- full_join(data_nb_partn, tmp_nb_partn, by = "rel_status")
 
-# compute mean number of partners and prepare output table
-data_nb_partn <- data_nb_partn %>% 
-  mutate(mean_partn_rep = nb_partn_rep / N_total)
 
-nb_partn_out <- data_nb_partn %>% 
-  select(rel_status, reltn_type, mean_partn_rep) %>% 
-  pivot_wider(names_from = rel_status, values_from = mean_partn_rep)
+# assume typo if month is same but year off by 1, if recent month is after then use that (n=23)
+table(data_partn$rel_length <= 0)
+table(data_partn$rel_length <= 0 & 
+        (year(data_partn$first_sex_date) - 1) == year(data_partn$recent_sex_date) & 
+        month(data_partn$first_sex_date) <= month(data_partn$recent_sex_date))
+data_partn <- mutate(
+  data_partn, rel_length = ifelse(rel_length <= 0 & 
+                                    (year(first_sex_date) - 1) == year(recent_sex_date) & 
+                                    month(first_sex_date) <= month(recent_sex_date),
+                                  as.numeric(recent_sex_date - (first_sex_date - years(1))),
+                                  rel_length
+  )
+)
 
-# add overall (not rel_status-stratified) mean number of partners per category
-tmp_nb_partn <- tmp_nb_partn %>% 
-  group_by(reltn_type) %>% 
-  summarize(nb_reported = sum(nb_partn_rep))
-tmp_nb_partn$overall <- tmp_nb_partn$nb_reported / n_respondent
+# assume if one-time or casual then duration of 1 (n = 59)
+table(data_partn$reltn_type[data_partn$rel_length <= 0])
+data_partn$rel_length[data_partn$rel_length <= 0 & 
+                        (data_partn$reltn_type == "one-time" | data_partn$reltn_type == "casual")] <- 1
 
-nb_partn_out <- full_join(tmp_nb_partn, nb_partn_out, by = c("reltn_type"))
-rm(tmp_nb_partn)
+# remaining 12 impute 1 as well
+table(data_partn$rel_length <= 0)
+data_partn[data_partn$rel_length <= 0, ]
 
-## verify that column mean matches with mean reported number 
-# overall
-nb_partn_out[, 3] %>% colSums(na.rm = T)
-nrow(data_base) / nrow(data_demo)
+data_partn$rel_length[data_partn$rel_length <= 0] <- 1
 
-# by relationship status
-nb_partn_out[, 4:7] %>% colSums(na.rm = T)
-data_base %>% 
-  count(rel_status, name = "nb_partn_rep") %>% 
-  left_join(count(data_demo, rel_status, name = "n_respondents"),
-            by = c("rel_status")) %>% 
-  mutate(mean = nb_partn_rep / n_respondents)
+# simple descriptive tables
+tapply(data_partn$rel_length, paste(data_partn$city, data_partn$reltn_type, sep = "-"), summary)
+tapply(data_partn$rel_length/30, paste(data_partn$city, data_partn$reltn_type, sep = "-"), summary)
 
-write.csv(nb_partn_out, "./output/partn-duration-freq/mean_nb_partn.csv",
-          row.names = FALSE)
+## Data cleaning - sex frequency ----
+# exclude PNA's (n=228)
+table(data_partn$p6m_sex_num_pna, useNA = "ifany")
+data_partn_freq <- filter(data_partn, p6m_sex_num_pna == 0)
+sum(is.na(data_partn_freq$p6m_sex_num))
 
-## Duration of partnerships ----
-### sheer number
-ggplot(data_base, aes(x = par_duration/30, y = reltn_type, fill = reltn_type)) +
-  # 6-month limit
-  geom_vline(xintercept = 180/30) +
-  geom_boxplot() +
-  coord_cartesian(xlim = c(0, 5000)/30) +
-  scale_x_continuous("Partnership duration in months") +
-  scale_y_discrete(limits = rev(levels(data_base$reltn_type))) +
-  ggtitle("Partnership duration (months), by Type of Partnership") +
-  theme(legend.position = "none")
+# simple descriptive tables
+tapply(data_partn_freq$p6m_sex_num, paste(data_partn_freq$city, data_partn_freq$reltn_type, sep = "-"), summary)
 
-ggsave("./figures/partn-sex-freq/distr_partn_length_by_type.png", device = "png",
-       width = 30, height = 14, units = "cm", dpi = 300)
+# assume cap at 1 per day (n=25)
+sum(data_partn_freq$p6m_sex_num > 180)
+data_partn_freq$p6m_sex_num <- ifelse(data_partn_freq$p6m_sex_num > 180,
+                                      180, data_partn_freq$p6m_sex_num)
 
-ggplot(data_base, aes(x = par_duration, group = reltn_type, fill = reltn_type)) +
-  geom_histogram(bins = 100) +
-  coord_cartesian(xlim = c(0, 5000)) +
-  scale_x_continuous("Partnership duration in days") +
-  ggtitle("Partnership duration in days, by Type of Partnership") +
-  scale_fill_discrete(name = "type of partnership")
+# impute minimum as 1 given that person was reported as partner (n = 200)
+sum(data_partn_freq$p6m_sex_num == 0)
+data_partn_freq$p6m_sex_num <- ifelse(data_partn_freq$p6m_sex_num == 0,
+                                      1, data_partn_freq$p6m_sex_num)
 
-### faceted by reltn_type
-duration_by_type <- data_base %>% 
-  count(reltn_type, par_duration) %>%
-  group_by(reltn_type) 
-
-# ggplot(data_base, aes(x = par_duration)) +
-#   geom_histogram(y = n, bins = 100) + facet_wrap(~reltn_type) +
-#   scale_fill_viridis_d() +
-#   coord_cartesian(xlim = c(0, 5000)) +
-#   scale_x_continuous("Partnership duration in days") +
-#   ylab("Count") +
-#   ggtitle("Partnership duration in days for Partnership Types")
-
-## faceted by rel_status
-ggplot(data_base,
-       aes(x = par_duration/30, y = reltn_type, fill = reltn_type)) +
-  # 6-month limit
-  geom_vline(xintercept = 180/30) +
-  geom_boxplot() +
+# Descriptive -----
+## Partnership duration ----
+# visualize
+ggplot(data_partn, aes(x = city, y = rel_length, fill = city)) +
+  geom_violin(alpha = 0.5) +
   
-  facet_wrap(~rel_status) +
-  
-  coord_cartesian(xlim = c(0, 5000)/30) +
-  scale_x_continuous("Partnership duration in months") +
-  scale_y_discrete(limits = rev(levels(data_base$reltn_type))) +
-  ggtitle("Partnership duration (months), by Type of Partnership") +
-  theme(legend.position = "none")
+  coord_cartesian(ylim = c(0, 2000)) +
+  facet_wrap(~reltn_type)
 
-ggsave("./figures/partn-sex-freq/distr_partn_length_by_type_relstatus.png", device = "png",
-       width = 30, height = 14, units = "cm", dpi = 300)
-
-### Output partnership duration ----
-# compute raw duration
-data_duration <- data_base %>% 
-  mutate(par_duration = ifelse(par_duration == 0, 1, par_duration)) %>% 
-  group_by(reltn_type) %>% 
+## summarize
+# by key statistics
+data_partn_num_tbl <- data_partn %>% 
+  group_by(city, reltn_type) %>% 
   summarize(
-    across(par_duration, list(mean=~mean(., na.rm = TRUE), sd = ~sd(., na.rm = TRUE),
-                              Q0 = ~min(., na.rm = TRUE), Q1 = ~quantile(.,0.25,na.rm = TRUE), Q2 = ~median(., na.rm = TRUE),
-                              Q3 = ~quantile(.,0.75,na.rm = TRUE), Q4 = ~max(., na.rm = TRUE)),
-           .names = "dur_{.fn}"))
-
-data_duration_100quant <- data_base %>% 
-  mutate(par_duration = ifelse(par_duration == 0, 1, par_duration)) %>% 
-  group_by(reltn_type) %>% 
-  summarize(q=list(quantile(par_duration, probs = seq(0,1,0.01), na.rm=T)))%>%
-  unnest_wider(q, names_repair = ~paste0('dur_Q', sub('%', '', .)))
-
-# compute duration setting ceiling to 90% of data
-# 90% of entries last <1642 days (4.5 years), 99% <8802 days (24 yrs)
-quantile(data_base$par_duration, c(.9, .99), na.rm = T)
-tapply(data_base$par_duration, data_base$reltn_type, na.rm = T, quantile, c(.9, .99))
-
-data_duration_adj <- data_base %>% 
-  mutate(par_duration = case_when(
-    par_duration == 0 ~ 1,
-    par_duration >= 365*5 ~ 365*5,
-    TRUE ~ par_duration
-    )) %>% 
-  group_by(reltn_type) %>% 
-  summarize(
-    across(par_duration, list(mean=~mean(., na.rm = TRUE), sd = ~sd(., na.rm = TRUE),
-                              Q0 = ~min(., na.rm = TRUE), Q1 = ~quantile(.,0.25,na.rm = TRUE), Q2 = ~median(., na.rm = TRUE),
-                              Q3 = ~quantile(.,0.75,na.rm = TRUE), Q4 = ~max(., na.rm = TRUE)),
-           .names = "dur_{.fn}")
+    n_indv = length(unique(part_id)), n_rel = n(),
+    mean = mean(rel_length), sd = sd(rel_length),
+    q0 = min(rel_length), q1 = quantile(rel_length, .25),
+    q2 = median(rel_length), q3 = quantile(rel_length, .75),
+    q4 = max(rel_length), .groups = "drop"
   )
 
-data_duration_adj_100quant <- data_base %>% 
-  mutate(par_duration = case_when(
-    par_duration == 0 ~ 1,
-    par_duration >= 365*5 ~ 365*5,
-    TRUE ~ par_duration
-  )) %>% 
-  group_by(reltn_type) %>% 
-  summarize(q=list(quantile(par_duration, probs = seq(0,1,0.01), na.rm=T)))%>%
-  unnest_wider(q)
+# by 1-percentile
+quants <- seq(0, 1, .01)
+data_partn_num_perc <- data.frame()
+
+for(cur_cty in CITIES){
+  for(cur_type in RELTN_TYPES){
+    data_tmp <- filter(data_partn, city == cur_cty & cur_type == reltn_type)
+    
+    # compute summary statistics
+    data_summ_tmp <- data.frame(
+      city = cur_cty, reltn_type = cur_type,
+      n_indv = length(unique(data_tmp$part_id)), n_rel = nrow(data_tmp),
+      mean = mean(data_tmp$rel_length), sd = sd(data_tmp$rel_length)
+    )
+    
+    # compute percentiles
+    data_perc_tmp <- t(quantile(data_tmp$rel_length, probs = quants))
+    colnames(data_perc_tmp) <- paste0("q_", format(quants, digits = 3))
+    
+    # join
+    data_partn_num_perc <- rbind(data_partn_num_perc, cbind(data_summ_tmp, data_perc_tmp))
+  }
+}
+
+rm(data_tmp, cur_cty, cur_type)
+
+# verify results
+data_partn_num_tbl
+data_partn_num_perc[1:12, 1:6]
+
+## Sex frequency ----
+# visualize
+ggplot(data_partn_freq, aes(x = city, y = p6m_sex_num, fill = city)) +
+  geom_violin(alpha = 0.5) +
+  
+  coord_cartesian(ylim = c(0, 200)) +
+  facet_wrap(~reltn_type)
+
+## summarize
+# by key statistics
+data_partn_frq_tbl <- data_partn_freq %>% 
+  group_by(city, reltn_type) %>% 
+  summarize(
+    n_indv = length(unique(part_id)), n_rel = n(),
+    mean = mean(p6m_sex_num), sd = sd(p6m_sex_num),
+    q0 = min(p6m_sex_num), q1 = quantile(p6m_sex_num, .25),
+    q2 = median(p6m_sex_num), q3 = quantile(p6m_sex_num, .75),
+    q4 = max(p6m_sex_num), .groups = "drop"
+  )
+
+# by 1-percentile
+quants <- seq(0, 1, .01)
+data_partn_frq_perc <- data.frame()
+
+for(cur_cty in CITIES){
+  for(cur_type in RELTN_TYPES){
+    data_tmp <- filter(data_partn_freq, city == cur_cty & cur_type == reltn_type)
+    
+    # compute summary statistics
+    data_summ_tmp <- data.frame(
+      city = cur_cty, reltn_type = cur_type,
+      n_indv = length(unique(data_tmp$part_id)), n_rel = nrow(data_tmp),
+      mean = mean(data_tmp$p6m_sex_num), sd = sd(data_tmp$p6m_sex_num)
+    )
+    
+    # compute percentiles
+    data_perc_tmp <- t(quantile(data_tmp$p6m_sex_num, probs = quants))
+    colnames(data_perc_tmp) <- paste0("q_", format(quants, digits = 3))
+    
+    # join
+    data_partn_frq_perc <- rbind(data_partn_frq_perc, cbind(data_summ_tmp, data_perc_tmp))
+  }
+}
+
+rm(data_tmp, cur_cty, cur_type)
+
+# verify results
+data_partn_frq_tbl
+data_partn_frq_perc[1:12, 1:6]
+
+# Output
+
+write.csv(data_partn_frq_perc, "./misc-data-proc-jk/outputs/engage_partnership_sexfreq.csv",
+          row.names = FALSE)
+write.csv(data_partn_num_perc, "./misc-data-proc-jk/outputs/engage_partnership_duration.csv",
+          row.names = FALSE)
 
 
-write.csv(data_duration, "./output/partn-duration-freq/partnership_duration_obs.csv",
-          row.names = FALSE)
-write.csv(data_duration_adj, "./output/partn-duration-freq/partnership_duration_adjusted.csv",
-          row.names = FALSE)
 
-write.csv(data_duration_100quant, "./output/partn-duration-freq/partnership_duration_obs_quantiles.csv",
-          row.names = FALSE)
-write.csv(data_duration_adj_100quant, "./output/partn-duration-freq/partnership_duration_adjusted_quantiles.csv",
-          row.names = FALSE)
