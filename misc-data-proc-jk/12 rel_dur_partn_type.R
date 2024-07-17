@@ -107,7 +107,7 @@ data_partn$rel_length[data_partn$rel_length <= 0] <- 1
 tapply(data_partn$rel_length, paste(data_partn$city, data_partn$reltn_type, sep = "-"), summary)
 tapply(data_partn$rel_length/30, paste(data_partn$city, data_partn$reltn_type, sep = "-"), summary)
 
-## Data cleaning - sex frequency ----
+## Data cleaning - sex frequency & rate ----
 # exclude PNA's (n=228)
 table(data_partn$p6m_sex_num_pna, useNA = "ifany")
 data_partn_freq <- filter(data_partn, p6m_sex_num_pna == 0)
@@ -120,6 +120,14 @@ tapply(data_partn_freq$p6m_sex_num, paste(data_partn_freq$city, data_partn_freq$
 sum(data_partn_freq$p6m_sex_num > 180)
 data_partn_freq$p6m_sex_num <- ifelse(data_partn_freq$p6m_sex_num > 180,
                                       180, data_partn_freq$p6m_sex_num)
+
+# check reports of nb sex acts > min(length of relationship, 6 months) (n = 757)
+data_partn_freq <- data_partn_freq %>% 
+  group_by(part_id, visit_num, partner_id) %>% 
+  mutate(rel_length_cap = min(rel_length, 180), .after = rel_length) %>% 
+  ungroup()
+
+sum(data_partn_freq$p6m_sex_num > data_partn_freq$rel_length_cap)
 
 # impute minimum as 1 given that person was reported as partner (n = 200)
 sum(data_partn_freq$p6m_sex_num == 0)
@@ -175,31 +183,46 @@ rm(data_tmp, cur_cty, cur_type)
 
 # verify results
 data_partn_num_tbl
-data_partn_num_perc[1:12, 1:6]
+data_partn_num_perc[1:12, c(1:6, which(colnames(data_partn_num_perc) %in% c("q_0.00", "q_0.25", "q_0.50", "q_0.75", "q_1.00")))]
 
-## Sex frequency ----
-# visualize
+## Sex frequency & rate ----
+data_partn_freq <- mutate(data_partn_freq, p6m_sex_rate = p6m_sex_num / rel_length_cap, .after = p6m_sex_num)
+
+data_partn_freq <- data_partn_freq %>% 
+  group_by(part_id, visit_num, partner_id) %>% 
+  mutate(p6m_sex_rate_cap = min(p6m_sex_rate, 1), .after = p6m_sex_rate) %>% 
+  ungroup()
+
+# visualize (frequency)
 ggplot(data_partn_freq, aes(x = city, y = p6m_sex_num, fill = city)) +
   geom_violin(alpha = 0.5) +
   
   coord_cartesian(ylim = c(0, 200)) +
   facet_wrap(~reltn_type)
 
+# visualize (rate, both uncapped and capped)
+ggplot(data_partn_freq, aes(x = city, y = p6m_sex_rate, fill = city)) +
+  geom_jitter(alpha = 0.2) +
+  geom_violin(alpha = 0.5) +
+  
+  coord_cartesian(ylim = c(0, 2)) +
+  facet_wrap(~reltn_type)
+
 ## summarize
 # by key statistics
-data_partn_frq_tbl <- data_partn_freq %>% 
+data_partn_rate_tbl <- data_partn_freq %>% 
   group_by(city, reltn_type) %>% 
   summarize(
     n_indv = length(unique(part_id)), n_rel = n(),
-    mean = mean(p6m_sex_num), sd = sd(p6m_sex_num),
-    q0 = min(p6m_sex_num), q1 = quantile(p6m_sex_num, .25),
-    q2 = median(p6m_sex_num), q3 = quantile(p6m_sex_num, .75),
-    q4 = max(p6m_sex_num), .groups = "drop"
+    mean = mean(p6m_sex_rate_cap), sd = sd(p6m_sex_rate_cap),
+    q0 = min(p6m_sex_rate_cap), q1 = quantile(p6m_sex_rate_cap, .25),
+    q2 = median(p6m_sex_rate_cap), q3 = quantile(p6m_sex_rate_cap, .75),
+    q4 = max(p6m_sex_rate_cap), .groups = "drop"
   )
 
 # by 1-percentile
 quants <- seq(0, 1, .01)
-data_partn_frq_perc <- data.frame()
+data_partn_rate_perc <- data.frame()
 
 for(cur_cty in CITIES){
   for(cur_type in RELTN_TYPES){
@@ -209,27 +232,27 @@ for(cur_cty in CITIES){
     data_summ_tmp <- data.frame(
       city = cur_cty, reltn_type = cur_type,
       n_indv = length(unique(data_tmp$part_id)), n_rel = nrow(data_tmp),
-      mean = mean(data_tmp$p6m_sex_num), sd = sd(data_tmp$p6m_sex_num)
+      mean = mean(data_tmp$p6m_sex_rate_cap), sd = sd(data_tmp$p6m_sex_rate_cap)
     )
     
     # compute percentiles
-    data_perc_tmp <- t(quantile(data_tmp$p6m_sex_num, probs = quants))
+    data_perc_tmp <- t(quantile(data_tmp$p6m_sex_rate_cap, probs = quants))
     colnames(data_perc_tmp) <- paste0("q_", format(quants, digits = 3))
     
     # join
-    data_partn_frq_perc <- rbind(data_partn_frq_perc, cbind(data_summ_tmp, data_perc_tmp))
+    data_partn_rate_perc <- rbind(data_partn_rate_perc, cbind(data_summ_tmp, data_perc_tmp))
   }
 }
 
 rm(data_tmp, cur_cty, cur_type)
 
 # verify results
-data_partn_frq_tbl
-data_partn_frq_perc[1:12, 1:6]
+data_partn_rate_tbl
+data_partn_rate_perc[1:12, c(1:6, which(colnames(data_partn_rate_perc) %in% c("q_0.00", "q_0.25", "q_0.50", "q_0.75", "q_1.00")))]
 
-# Output
+# Output ----
 
-write.csv(data_partn_frq_perc, "./misc-data-proc-jk/outputs/engage_partnership_sexfreq.csv",
+write.csv(data_partn_rate_perc, "./misc-data-proc-jk/outputs/engage_partnership_sexrate.csv",
           row.names = FALSE)
 write.csv(data_partn_num_perc, "./misc-data-proc-jk/outputs/engage_partnership_duration.csv",
           row.names = FALSE)
