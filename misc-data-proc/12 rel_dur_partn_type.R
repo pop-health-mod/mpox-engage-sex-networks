@@ -252,9 +252,9 @@ data_partn_rate_perc[1:12, c(1:6, which(colnames(data_partn_rate_perc) %in% c("q
 
 # Output ----
 
-write.csv(data_partn_rate_perc, "./misc-data-proc-jk/outputs/engage_partnership_sexrate.csv",
+write.csv(data_partn_rate_perc, "./misc-data-proc/outputs-jk/engage_partnership_sexrate.csv",
           row.names = FALSE)
-write.csv(data_partn_num_perc, "./misc-data-proc-jk/outputs/engage_partnership_duration.csv",
+write.csv(data_partn_num_perc, "./misc-data-proc/outputs-jk/engage_partnership_duration.csv",
           row.names = FALSE)
 
 

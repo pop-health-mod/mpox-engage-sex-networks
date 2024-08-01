@@ -82,6 +82,6 @@ tapply(dat_partn_distr$p, paste(dat_partn_distr$city, dat_partn_distr$rel_status
 tapply(dat_partn_distr$p.rds, paste(dat_partn_distr$city, dat_partn_distr$rel_status, sep = "-"), sum)
 
 ## save data ----
-write.csv(x = dat_nb_rel, file = "./misc-data-proc-jk/outputs/engage_relat_distribution.csv", row.names = F)
-write.csv(x = dat_partn_distr, file = "./misc-data-proc-jk/outputs/engage_nb_partn_p6m_by_relat_stat.csv", row.names = F)
+write.csv(x = dat_nb_rel, file = "./misc-data-proc/outputs-jk/engage_relat_distribution.csv", row.names = F)
+write.csv(x = dat_partn_distr, file = "./misc-data-proc/outputs-jk/engage_nb_partn_p6m_by_relat_stat.csv", row.names = F)
 
